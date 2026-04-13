@@ -1,0 +1,124 @@
+[common]
+unknown_error = "Unknown error occurred"
+not_configured = "Not configured"
+cancel = "❌ Cancel"
+back = "◀️ Back"
+loading = "⏳ Loading..."
+done = "✅ Done"
+error_occurred = "❌ An error occurred"
+
+[bot]
+welcome = """
+Welcome to OpenCode Telegram Bot! 🤖
+
+I help you run and monitor AI coding tasks from Telegram.
+
+Commands:
+/status - Server and session info
+/new - Create new session
+/sessions - List recent sessions
+/projects - Switch projects
+/commands - Run custom commands
+/help - Show all commands
+
+Send me any message to start coding!
+"""
+session_created = "✅ New session created"
+session_switched = "✅ Switched to session: {title}"
+project_switched = "✅ Switched to project: {name}"
+processing = "💭 Processing your request..."
+session_error = "❌ Session error: {message}"
+session_retry = "🔁 Retrying: {message}"
+no_active_session = "No active session. Use /new to create one."
+interaction_blocked = "⚠️ Please finish the current interaction first."
+thinking = "💭 Thinking..."
+
+[status]
+no_session = "No active session"
+no_project = "No project selected"
+status_header = "📊 OpenCode Status"
+current_project = "📁 Project: {name}"
+current_session = "💬 Session: {title}"
+current_model = "🤖 Model: {provider}/{model}"
+server_online = "🟢 Server: Online"
+server_offline = "🔴 Server: Offline"
+
+[commands]
+help_header = "📖 Available Commands"
+start_desc = "Start the bot"
+help_desc = "Show this help message"
+status_desc = "Show server and session status"
+new_desc = "Create a new session"
+sessions_desc = "List and switch sessions"
+projects_desc = "List and switch projects"
+commands_desc = "Run custom commands"
+abort_desc = "Abort current task"
+task_desc = "Create scheduled task"
+tasklist_desc = "List scheduled tasks"
+tts_desc = "Toggle text-to-speech"
+rename_desc = "Rename current session"
+opencode_start_desc = "Start OpenCode server"
+opencode_stop_desc = "Stop OpenCode server"
+
+[task]
+header = "⏰ Scheduled Tasks"
+no_tasks = "No scheduled tasks"
+task_limit_reached = "Task limit reached (max {limit})"
+created_success = "✅ Task created successfully"
+deleted_success = "✅ Task deleted"
+next_run = "Next run: {time}"
+last_run = "Last run: {time}"
+status_idle = "⏸️ Idle"
+status_running = "🔄 Running"
+status_success = "✅ Success"
+status_error = "❌ Error"
+prompt_label = "📝 Prompt"
+schedule_label = "📅 Schedule"
+run_success = """
+✅ Scheduled task completed
+
+Task: {description}
+Completed at: {run_at}
+"""
+run_error = """
+❌ Scheduled task failed
+
+Task: {description}
+Error: {error}
+"""
+
+[session]
+list_header = "💬 Recent Sessions"
+select_prompt = "Select a session:"
+no_sessions = "No recent sessions found"
+
+[project]
+list_header = "📁 Projects"
+select_prompt = "Select a project:"
+no_projects = "No projects found"
+
+[model]
+select_prompt = "🤖 Select a model:"
+current_label = "(current)"
+favorites_header = "⭐ Favorites"
+recent_header = "🕐 Recent"
+
+[permission]
+request_header = "🔒 Permission Request"
+approve = "✅ Approve"
+deny = "❌ Deny"
+
+[question]
+header = "❓ Question from AI"
+submit = "✅ Submit"
+
+[stt]
+not_configured = "🎤 Voice transcription not configured. Set STT__API_URL and STT__API_KEY."
+transcribing = "🎤 Transcribing..."
+transcribed = "📝 Transcribed: {text}"
+transcription_failed = "❌ Transcription failed: {error}"
+
+[tts]
+enabled = "🔊 Text-to-speech enabled"
+disabled = "🔇 Text-to-speech disabled"
+not_configured = "🔊 TTS not configured. Set TTS__API_URL and TTS__API_KEY."

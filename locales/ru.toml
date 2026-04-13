@@ -1,0 +1,124 @@
+[common]
+unknown_error = "Произошла неизвестная ошибка"
+not_configured = "Не настроено"
+cancel = "❌ Отмена"
+back = "◀️ Назад"
+loading = "⏳ Загрузка..."
+done = "✅ Готово"
+error_occurred = "❌ Произошла ошибка"
+
+[bot]
+welcome = """
+Добро пожаловать в OpenCode Telegram Bot! 🤖
+
+Я помогаю запускать и отслеживать задачи AI-программирования из Telegram.
+
+Команды:
+/status - Информация о сервере и сессии
+/new - Создать новую сессию
+/sessions - Список недавних сессий
+/projects - Переключить проекты
+/commands - Запустить команды
+/help - Показать все команды
+
+Отправьте любое сообщение, чтобы начать программировать!
+"""
+session_created = "✅ Новая сессия создана"
+session_switched = "✅ Переключено на сессию: {title}"
+project_switched = "✅ Переключено на проект: {name}"
+processing = "💭 Обрабатываю ваш запрос..."
+session_error = "❌ Ошибка сессии: {message}"
+session_retry = "🔁 Повторная попытка: {message}"
+no_active_session = "Нет активной сессии. Используйте /new для создания."
+interaction_blocked = "⚠️ Сначала завершите текущее взаимодействие."
+thinking = "💭 Думаю..."
+
+[status]
+no_session = "Нет активной сессии"
+no_project = "Проект не выбран"
+status_header = "📊 Статус OpenCode"
+current_project = "📁 Проект: {name}"
+current_session = "💬 Сессия: {title}"
+current_model = "🤖 Модель: {provider}/{model}"
+server_online = "🟢 Сервер: Онлайн"
+server_offline = "🔴 Сервер: Офлайн"
+
+[commands]
+help_header = "📖 Доступные команды"
+start_desc = "Запустить бота"
+help_desc = "Показать это сообщение"
+status_desc = "Показать статус сервера и сессии"
+new_desc = "Создать новую сессию"
+sessions_desc = "Список и переключение сессий"
+projects_desc = "Список и переключение проектов"
+commands_desc = "Запустить пользовательские команды"
+abort_desc = "Прервать текущую задачу"
+task_desc = "Создать запланированную задачу"
+tasklist_desc = "Список запланированных задач"
+tts_desc = "Переключить текст-в-речь"
+rename_desc = "Переименовать текущую сессию"
+opencode_start_desc = "Запустить сервер OpenCode"
+opencode_stop_desc = "Остановить сервер OpenCode"
+
+[task]
+header = "⏰ Запланированные задачи"
+no_tasks = "Нет запланированных задач"
+task_limit_reached = "Достигнут лимит задач (макс. {limit})"
+created_success = "✅ Задача успешно создана"
+deleted_success = "✅ Задача удалена"
+next_run = "Следующий запуск: {time}"
+last_run = "Последний запуск: {time}"
+status_idle = "⏸️ Ожидание"
+status_running = "🔄 Выполняется"
+status_success = "✅ Успешно"
+status_error = "❌ Ошибка"
+prompt_label = "📝 Запрос"
+schedule_label = "📅 Расписание"
+run_success = """
+✅ Запланированная задача выполнена
+
+Задача: {description}
+Выполнено в: {run_at}
+"""
+run_error = """
+❌ Запланированная задача не выполнена
+
+Задача: {description}
+Ошибка: {error}
+"""
+
+[session]
+list_header = "💬 Недавние сессии"
+select_prompt = "Выберите сессию:"
+no_sessions = "Недавних сессий не найдено"
+
+[project]
+list_header = "📁 Проекты"
+select_prompt = "Выберите проект:"
+no_projects = "Проекты не найдены"
+
+[model]
+select_prompt = "🤖 Выберите модель:"
+current_label = "(текущая)"
+favorites_header = "⭐ Избранные"
+recent_header = "🕐 Недавние"
+
+[permission]
+request_header = "🔒 Запрос разрешения"
+approve = "✅ Разрешить"
+deny = "❌ Отклонить"
+
+[question]
+header = "❓ Вопрос от AI"
+submit = "✅ Отправить"
+
+[stt]
+not_configured = "🎤 Распознавание голоса не настроено. Установите STT__API_URL и STT__API_KEY."
+transcribing = "🎤 Распознаю..."
+transcribed = "📝 Распознано: {text}"
+transcription_failed = "❌ Ошибка распознавания: {error}"
+
+[tts]
+enabled = "🔊 Текст-в-речь включен"
+disabled = "🔇 Текст-в-речь отключен"
+not_configured = "🔊 TTS не настроен. Установите TTS__API_URL и TTS__API_KEY."

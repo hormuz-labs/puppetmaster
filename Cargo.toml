@@ -1,0 +1,93 @@
+[package]
+name = "opencode-telegram-bot"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+authors = ["Your Name <your.email@example.com>"]
+description = "Telegram bot client for OpenCode - run and monitor AI coding tasks from chat"
+license = "MIT"
+repository = "https://github.com/yourusername/opencode-telegram-bot-rs"
+
+[dependencies]
+# Core async runtime
+tokio = { version = "1.40", features = ["full"] }
+
+# Telegram bot framework
+teloxide = { version = "0.17", features = ["macros", "webhooks-axum", "rustls"], default-features = false }
+
+# OpenCode SDK (official Rust SDK)
+opencode-sdk-rs = "0.2.0"
+
+# HTTP client for STT/TTS (when not using opencode-sdk-rs)
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "socks", "multipart"], default-features = false }
+
+# Cron scheduling
+tokio-cron-scheduler = { version = "0.15", features = ["english"] }
+cron = "0.15"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid", "json", "macros"], default-features = false }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Configuration
+dotenvy = "0.15"
+config = "0.14"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# i18n
+rust-i18n = "3.1"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde", "clock"] }
+
+# Markdown processing
+pulldown-cmark = "0.12"
+pulldown-cmark-to-cmark = "21.0"
+regex = "1.11"
+
+# File system operations
+directories = "5.0"
+tempfile = "3.14"
+
+# Utilities
+uuid = { version = "1.11", features = ["v4", "serde"] }
+parking_lot = "0.12"
+async-trait = "0.1"
+futures = "0.3"
+once_cell = "1.20"
+dashmap = "6.1"
+tokio-util = "0.7"
+bytes = "1.9"
+url = "2.5"
+base64 = "0.22"
+dptree = "0.5"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.13"
+tempfile = "3.14"
+wiremock = "0.6"
+
+[[bin]]
+name = "opencode-telegram"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true

@@ -28,7 +28,7 @@ pub async fn init_database(db_path: impl AsRef<Path>) -> Result<Pool<Sqlite>> {
 }
 
 /// Run database migrations
-async fn run_migrations(db: &Pool<Sqlite>) -> Result<()> {
+pub async fn run_migrations(db: &Pool<Sqlite>) -> crate::error::Result<()> {
     // Create tables if they don't exist
     sqlx::query(
         r#"
@@ -168,12 +168,20 @@ pub async fn list_settings(db: &Pool<Sqlite>) -> Result<Vec<(String, String)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use sqlx::sqlite::SqlitePoolOptions;
 
     async fn create_test_db() -> Pool<Sqlite> {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        init_database(&db_path).await.unwrap()
+        // Use in-memory database for tests
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        
+        // Run migrations
+        run_migrations(&pool).await.unwrap();
+        
+        pool
     }
 
     #[tokio::test]

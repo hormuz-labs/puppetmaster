@@ -17,7 +17,6 @@ use crate::scheduled_task::TaskScheduler;
 use crate::settings::SettingsManager;
 use directories::ProjectDirs;
 use std::path::PathBuf;
-use std::sync::Arc;
 use teloxide::dispatching::Dispatcher;
 use tracing::{error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;

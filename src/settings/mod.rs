@@ -1,10 +1,10 @@
-use crate::error::{BotError, Result};
+use crate::error::Result;
 use crate::opencode::types::{ModelInfo, ProjectInfo, SessionInfo};
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Sqlite};
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 pub mod db;
 
@@ -246,12 +246,29 @@ impl SettingsManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use crate::settings::db::run_migrations;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::sync::Arc;
+    use parking_lot::RwLock;
 
     async fn create_test_manager() -> SettingsManager {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        SettingsManager::new(&db_path).await.unwrap()
+        // Use in-memory database for tests
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        
+        // Run migrations
+        run_migrations(&pool).await.ok();
+        
+        // Create manager with the pool
+        let manager = SettingsManager {
+            db: pool,
+            cache: Arc::new(parking_lot::RwLock::new(Settings::default())),
+        };
+        
+        manager
     }
 
     #[tokio::test]

@@ -263,7 +263,7 @@ impl TaskScheduler {
                         })
                     }).map_err(|e| BotError::InvalidCron(e.to_string()))?;
 
-                    let mut scheduler = self.scheduler.write().await;
+                    let scheduler = self.scheduler.write().await;
                     scheduler.add(job).await
                         .map_err(|e| BotError::ScheduledTask(e.to_string()))?;
                 }

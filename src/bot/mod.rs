@@ -10,7 +10,7 @@ use teloxide::dptree;
 use teloxide::prelude::*;
 use teloxide::types::{BotCommand, ParseMode};
 use teloxide::utils::command::BotCommands;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 pub mod commands;
 pub mod handlers;
@@ -85,9 +85,9 @@ pub enum Command {
 /// Initialize the Telegram bot
 pub async fn init_bot(
     config: AppConfig,
-    settings: SettingsManager,
-    opencode: OpenCodeClient,
-    scheduler: TaskScheduler,
+    _settings: SettingsManager,
+    _opencode: OpenCodeClient,
+    _scheduler: TaskScheduler,
 ) -> Result<Bot> {
     let bot = Bot::new(&config.telegram.token);
     
@@ -167,7 +167,7 @@ async fn handle_command(
     cmd: Command,
     state: BotState,
 ) -> Result<()> {
-    info!("Received command {:?} from user {:?}", cmd, msg.from().map(|u| u.id));
+    info!("Received command {:?} from user {:?}", cmd, msg.from.as_ref().map(|u| u.id));
 
     match cmd {
         Command::Start => cmd_start(bot, msg).await,

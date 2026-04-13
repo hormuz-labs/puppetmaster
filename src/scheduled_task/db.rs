@@ -211,13 +211,21 @@ fn row_to_task(row: sqlx::sqlite::SqliteRow) -> Result<ScheduledTask> {
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use crate::settings::db::init_database;
-    use tempfile::tempdir;
+    use crate::settings::db::run_migrations;
+    use sqlx::sqlite::SqlitePoolOptions;
 
     async fn create_test_db() -> Pool<Sqlite> {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        init_database(&db_path).await.unwrap()
+        // Use in-memory database for tests
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        
+        // Run migrations
+        run_migrations(&pool).await.ok();
+        
+        pool
     }
 
     #[tokio::test]

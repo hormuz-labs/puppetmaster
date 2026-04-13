@@ -9,7 +9,7 @@ use tracing::{error, info};
 pub async fn cmd_start(bot: Bot, msg: Message) -> Result<()> {
     let welcome = t(I18nKey::BotWelcome, None);
     bot.send_message(msg.chat.id, welcome)
-        .parse_mode(ParseMode::Markdown)
+        .parse_mode(ParseMode::MarkdownV2)
         .await?;
     Ok(())
 }

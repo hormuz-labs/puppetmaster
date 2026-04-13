@@ -2,7 +2,7 @@ use super::BotState;
 use crate::i18n::{t, I18nKey};
 use crate::error::Result;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+
 use tracing::{debug, error, info};
 
 /// Handle text messages (prompts)
@@ -76,7 +76,7 @@ pub async fn handle_voice_message(
     let file_id = voice.file.id.clone();
     
     // Download voice file via Telegram API
-    let file = match bot.get_file(file_id).await {
+    let _file = match bot.get_file(file_id).await {
         Ok(f) => f,
         Err(e) => {
             error!("Failed to get voice file: {}", e);

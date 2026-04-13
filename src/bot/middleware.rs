@@ -4,7 +4,7 @@ use tracing::{debug, warn};
 
 /// Authentication middleware - check if user is authorized
 pub async fn auth_middleware(msg: Message, config: AppConfig) -> bool {
-    let Some(user) = msg.from() else {
+    let Some(user) = msg.from.as_ref() else {
         return false;
     };
 

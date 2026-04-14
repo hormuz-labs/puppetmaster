@@ -1,6 +1,7 @@
 mod state;
 mod helpers;
 mod handlers;
+mod markdown;
 
 use std::env;
 use std::sync::Arc;

@@ -9,10 +9,15 @@ use serde_json::{json, Value};
 use teloxide::{
     dispatching::dialogue::InMemStorage,
     prelude::*,
-    types::{KeyboardButton, KeyboardRemove, KeyboardMarkup, ParseMode},
+    types::{KeyboardButton, KeyboardRemove, KeyboardMarkup, ParseMode, ChatAction},
     utils::command::BotCommands,
 };
 use tracing::{error, info};
+use std::env;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
+use teloxide::net::Download;
 
 use crate::state::{State, Command};
 use crate::helpers::{main_menu_keyboard, render_html_chunks, create_session};
@@ -311,7 +316,98 @@ pub async fn handle_prompt(
     server_url: Arc<String>
 ) -> HandlerResult {
     let chat_id = msg.chat.id;
-    let text = if let Some(t) = msg.text() { t } else { return Ok(()) };
+    let mut text = String::new();
+    
+    if let Some(t) = msg.text() {
+        text = t.to_string();
+    } else if let Some(voice) = msg.voice() {
+        let bot_msg = bot.send_message(chat_id, "🎙 Processing voice message...").await?;
+        let google_api_key = env::var("GOOGLE_SPEECH_API_KEY").unwrap_or_else(|_| env::var("GOOGLE_API_KEY").unwrap_or_default());
+        if google_api_key.is_empty() {
+            let _ = bot.edit_message_text(chat_id, bot_msg.id, "❌ GOOGLE_SPEECH_API_KEY not set in .env. Voice messages are not supported.").await;
+            return Ok(());
+        }
+
+        let file = match bot.get_file(voice.file.id.clone()).await {
+            Ok(f) => f,
+            Err(e) => {
+                let _ = bot.edit_message_text(chat_id, bot_msg.id, format!("❌ Failed to get voice file: {}", e)).await;
+                return Ok(());
+            }
+        };
+        
+        let temp_path = format!("/tmp/voice_{}.ogg", voice.file.id);
+        let mut temp_file = match tokio::fs::File::create(&temp_path).await {
+            Ok(f) => f,
+            Err(e) => {
+                let _ = bot.edit_message_text(chat_id, bot_msg.id, format!("❌ Failed to create temp file: {}", e)).await;
+                return Ok(());
+            }
+        };
+
+        if let Err(e) = bot.download_file(&file.path, &mut temp_file).await {
+            let _ = bot.edit_message_text(chat_id, bot_msg.id, format!("❌ Failed to download voice: {}", e)).await;
+            return Ok(());
+        }
+
+        let mut buffer = Vec::new();
+        let mut temp_file = tokio::fs::File::open(&temp_path).await?;
+        temp_file.read_to_end(&mut buffer).await?;
+        let _ = tokio::fs::remove_file(&temp_path).await;
+
+        let base64_audio = STANDARD.encode(&buffer);
+        let payload = json!({
+            "config": {
+                "encoding": "OGG_OPUS",
+                "sampleRateHertz": 48000,
+                "languageCode": "en-US"
+            },
+            "audio": {
+                "content": base64_audio
+            }
+        });
+
+        let res = client.post(format!("https://speech.googleapis.com/v1/speech:recognize?key={}", google_api_key))
+            .json(&payload)
+            .send()
+            .await;
+
+        match res {
+            Ok(response) if response.status().is_success() => {
+                let json_data: Value = response.json().await?;
+                if let Some(results) = json_data["results"].as_array() {
+                    if let Some(first) = results.first() {
+                        if let Some(alternatives) = first["alternatives"].as_array() {
+                            if let Some(first_alt) = alternatives.first() {
+                                if let Some(transcript) = first_alt["transcript"].as_str() {
+                                    text = transcript.to_string();
+                                    let _ = bot.edit_message_text(chat_id, bot_msg.id, format!("🎙 Transcribed:\n\n_{}_", text)).parse_mode(ParseMode::Markdown).await;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if text.is_empty() {
+                    let _ = bot.edit_message_text(chat_id, bot_msg.id, "❌ Could not transcribe the voice message.").await;
+                    return Ok(());
+                }
+            }
+            Ok(response) => {
+                let error_text = response.text().await.unwrap_or_default();
+                error!("Google Speech API error: {}", error_text);
+                let _ = bot.edit_message_text(chat_id, bot_msg.id, "❌ Google Speech API returned an error.").await;
+                return Ok(());
+            }
+            Err(e) => {
+                error!("Google Speech network error: {}", e);
+                let _ = bot.edit_message_text(chat_id, bot_msg.id, "❌ Network error reaching Google Speech API.").await;
+                return Ok(());
+            }
+        }
+    } else {
+        return Ok(());
+    }
     
     let bot_msg = match bot.send_message(chat_id, "⏳ Thinking...").await {
         Ok(m) => m,
@@ -321,7 +417,12 @@ pub async fn handle_prompt(
         }
     };
     
-    let sse_req = client.get(format!("{}/event?sessionID={}", server_url, session_id)).try_clone().unwrap();
+    let mut sse_req = client.get(format!("{}/event?sessionID={}", server_url, session_id));
+    if let Some(ref dir) = _directory {
+        sse_req = sse_req.header("x-opencode-directory", dir);
+    }
+    let sse_req = sse_req.try_clone().unwrap();
+    
     let mut es = match EventSource::new(sse_req) {
         Ok(es) => es,
         Err(e) => {
@@ -344,7 +445,11 @@ pub async fn handle_prompt(
         }
     }
 
-    let prompt_res = client.post(format!("{}/session/{}/prompt_async", server_url, session_id))
+    let mut req = client.post(format!("{}/session/{}/prompt_async", server_url, session_id));
+    if let Some(ref dir) = _directory {
+        req = req.header("x-opencode-directory", dir);
+    }
+    let prompt_res = req
         .json(&payload)
         .send()
         .await;
@@ -369,8 +474,24 @@ pub async fn handle_prompt(
     let mut part_types = HashMap::<String, String>::new();
     let mut sent_messages = vec![bot_msg.id];
     let mut last_edit = Instant::now();
+    let mut last_typing = Instant::now();
+    let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
     
-    while let Some(event_res) = es.next().await {
+    loop {
+        if last_typing.elapsed() > Duration::from_secs(4) {
+            let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
+            last_typing = Instant::now();
+        }
+
+        let event_res = match tokio::time::timeout(Duration::from_secs(1), es.next()).await {
+            Ok(Some(ev)) => ev,
+            Ok(None) => break,
+            Err(_) => continue,
+        };
+        if last_typing.elapsed() > Duration::from_secs(4) {
+            let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
+            last_typing = Instant::now();
+        }
         match event_res {
             Ok(Event::Open) => {
                 info!("SSE Connection Opened!");
@@ -477,6 +598,29 @@ pub async fn handle_prompt(
                 let _ = bot.edit_message_text(chat_id, sent_messages[i], chunk).await;
             }
         }
+    }
+    
+    Ok(())
+}
+
+pub async fn abort_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
+    let state = dialogue.get().await?.unwrap_or_default();
+    
+    if let State::ActiveSession { session_id, directory, .. } = state {
+        let mut req = client.post(format!("{}/session/{}/abort", server_url, session_id));
+        if let Some(dir) = directory {
+            req = req.header("x-opencode-directory", dir);
+        }
+        match req.send().await {
+            Ok(_) => {
+                bot.send_message(msg.chat.id, "🛑 Sent abort signal to the active session.").await?;
+            }
+            Err(e) => {
+                bot.send_message(msg.chat.id, format!("❌ Failed to abort: {}", e)).await?;
+            }
+        }
+    } else {
+        bot.send_message(msg.chat.id, "No active session to abort.").await?;
     }
     
     Ok(())

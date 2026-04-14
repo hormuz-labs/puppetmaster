@@ -36,4 +36,6 @@ pub enum Command {
     Project,
     #[command(description = "Set the AI model (e.g., google/gemini-3-pro-preview).")]
     Model,
+    #[command(description = "Abort the current generation.")]
+    Abort,
 }

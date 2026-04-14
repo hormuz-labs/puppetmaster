@@ -1,6 +1,7 @@
 use reqwest::Client;
 use serde_json::{json, Value};
 use teloxide::types::{KeyboardButton, KeyboardMarkup};
+use crate::markdown::markdown_to_telegram_html_chunks;
 
 pub fn main_menu_keyboard() -> KeyboardMarkup {
     KeyboardMarkup::new(vec![
@@ -22,52 +23,38 @@ pub fn escape_html(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-use crate::markdown::markdown_to_telegram_html;
-
 pub fn render_html_chunks(thinking: &str, answer: &str, thinking_header: &str) -> Vec<String> {
     let mut chunks = Vec::new();
-    let limit = 3900;
     
-    // We'll build the final telegram HTML then chunk it.
-    // While chunking HTML is hard, Telegram is somewhat forgiving,
-    // but splitting in the middle of a tag is bad.
-    
-    // Actually, maybe we can just build strings and split?
-    let mut full_html = String::new();
-    
-    if !thinking.trim().is_empty() {
-        let escaped = escape_html(thinking.trim());
-        full_html.push_str(&format!("<blockquote><b>{}</b>\n{}\n</blockquote>\n\n", thinking_header, escaped));
-    }
-    
-    if !answer.trim().is_empty() {
-        let answer_html = markdown_to_telegram_html(answer);
-        full_html.push_str(&answer_html);
-    } else if thinking.trim().is_empty() {
-        // Nothing at all
-    } else {
-        full_html.push_str("✅ Done (Thinking only)");
-    }
-    
-    if full_html.is_empty() {
-        return vec![String::new()];
-    }
-
-    // A simple chunker that tries to split by newlines without breaking HTML tags
-    let mut current_chunk = String::new();
-    
-    for line in full_html.split_inclusive('\n') {
-        if current_chunk.len() + line.len() > limit {
-            chunks.push(current_chunk.clone());
-            current_chunk.clear();
+    let thinking = thinking.trim();
+    if !thinking.is_empty() {
+        let mut current = String::new();
+        for line in thinking.split_inclusive('\n') {
+            if current.len() + line.len() > 3800 {
+                chunks.push(format!("<blockquote><b>{}</b>\n{}</blockquote>", thinking_header, escape_html(&current)));
+                current.clear();
+            }
+            current.push_str(line);
         }
-        current_chunk.push_str(line);
+        if !current.is_empty() {
+            chunks.push(format!("<blockquote><b>{}</b>\n{}</blockquote>", thinking_header, escape_html(&current)));
+        }
     }
     
-    if !current_chunk.is_empty() {
-        chunks.push(current_chunk);
+    let answer = answer.trim();
+    if !answer.is_empty() {
+        let answer_chunks = markdown_to_telegram_html_chunks(answer);
+        chunks.extend(answer_chunks);
+    } else if !thinking.is_empty() {
+        if let Some(last) = chunks.last_mut() {
+            last.push_str("\n\n✅ Done (Thinking only)");
+        }
     }
-
+    
+    if chunks.is_empty() {
+        chunks.push(String::new());
+    }
+    
     chunks
 }
 
@@ -75,6 +62,7 @@ pub async fn create_session(client: &Client, server_url: &str, directory: Option
     let mut req = client.post(format!("{}/session", server_url));
     if let Some(dir) = directory {
         req = req.query(&[("directory", dir)]);
+        req = req.header("x-opencode-directory", dir);
     }
     
     let res = req.json(&json!({"title": "Telegram Bot Session"})).send().await?;

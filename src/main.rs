@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use teloxide::{
     dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler},
     prelude::*,
-    types::{KeyboardButton, KeyboardRemove, KeyboardMarkup},
+    types::{KeyboardButton, KeyboardRemove, KeyboardMarkup, MessageId, ParseMode},
     utils::command::BotCommands,
 };
 use tracing::{error, info, Level};
@@ -135,6 +135,97 @@ fn main_menu_keyboard() -> KeyboardMarkup {
         ],
     ])
     .resize_keyboard()
+}
+
+fn markdown_to_html(md: &str) -> String {
+    // A simple, best-effort markdown to HTML converter to make code blocks look nice
+    let mut html = String::new();
+    let mut in_code_block = false;
+    
+    for line in md.split('\n') {
+        if line.starts_with("```") {
+            in_code_block = !in_code_block;
+            if in_code_block {
+                let lang = line.trim_start_matches("```").trim();
+                if !lang.is_empty() {
+                    html.push_str(&format!("<pre><code class=\"language-{}\">", lang));
+                } else {
+                    html.push_str("<pre><code>");
+                }
+            } else {
+                html.push_str("</code></pre>\n");
+            }
+            continue;
+        }
+        
+        let mut processed_line = String::new();
+        let mut in_inline_code = false;
+        let mut chars = line.chars().peekable();
+        
+        while let Some(c) = chars.next() {
+            if c == '`' && !in_code_block {
+                in_inline_code = !in_inline_code;
+                if in_inline_code {
+                    processed_line.push_str("<code>");
+                } else {
+                    processed_line.push_str("</code>");
+                }
+            } else if c == '<' {
+                processed_line.push_str("&lt;");
+            } else if c == '>' {
+                processed_line.push_str("&gt;");
+            } else if c == '&' {
+                processed_line.push_str("&amp;");
+            } else {
+                processed_line.push(c);
+            }
+        }
+        
+        html.push_str(&processed_line);
+        html.push('\n');
+    }
+    
+    if in_code_block {
+        html.push_str("</code></pre>");
+    }
+    
+    html
+}
+
+fn chunk_text(text: &str, limit: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut current_chunk = String::new();
+    
+    for line in text.split('\n') {
+        if current_chunk.len() + line.len() + 1 > limit {
+            if !current_chunk.is_empty() {
+                chunks.push(current_chunk.clone());
+                current_chunk.clear();
+            }
+            
+            // If a single line is longer than the limit (rare, but possible)
+            if line.len() > limit {
+                let mut i = 0;
+                while i < line.len() {
+                    let end = std::cmp::min(i + limit, line.len());
+                    chunks.push(line[i..end].to_string());
+                    i += limit;
+                }
+                continue;
+            }
+        }
+        if !current_chunk.is_empty() {
+            current_chunk.push('\n');
+        }
+        current_chunk.push_str(line);
+    }
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk);
+    }
+    if chunks.is_empty() {
+        chunks.push(String::new());
+    }
+    chunks
 }
 
 async fn create_session(client: &Client, server_url: &str, directory: Option<&str>) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -513,6 +604,7 @@ async fn handle_prompt(
     }
     
     let mut full_text = String::new();
+    let mut sent_messages = vec![bot_msg.id];
     let mut last_edit = Instant::now();
     
     while let Some(event_res) = es.next().await {
@@ -533,7 +625,21 @@ async fn handle_prompt(
                                 // Edit message once per second to avoid rate limits
                                 if last_edit.elapsed() > Duration::from_secs(1) {
                                     if !full_text.trim().is_empty() {
-                                        let _ = bot.edit_message_text(chat_id, bot_msg.id, &full_text).await;
+                                        let chunks = chunk_text(&full_text, 4000);
+                                        
+                                        // Ensure we have enough messages to display all chunks
+                                        while sent_messages.len() < chunks.len() {
+                                            if let Ok(new_msg) = bot.send_message(chat_id, "⏳...").await {
+                                                sent_messages.push(new_msg.id);
+                                            } else {
+                                                break;
+                                            }
+                                        }
+                                        
+                                        // Only edit the last chunk during streaming for better performance
+                                        let last_chunk_index = chunks.len() - 1;
+                                        let last_msg_id = sent_messages[last_chunk_index];
+                                        let _ = bot.edit_message_text(chat_id, last_msg_id, &chunks[last_chunk_index]).await;
                                     }
                                     last_edit = Instant::now();
                                 }
@@ -563,10 +669,36 @@ async fn handle_prompt(
     
     // Final flush and close SSE
     es.close();
-    if !full_text.trim().is_empty() {
-        let _ = bot.edit_message_text(chat_id, bot_msg.id, &full_text).await;
-    } else {
-        let _ = bot.edit_message_text(chat_id, bot_msg.id, "✅ Done (No text output)").await;
+    
+    if full_text.trim().is_empty() {
+        let _ = bot.edit_message_text(chat_id, sent_messages[0], "✅ Done (No text output)").await;
+        return Ok(());
+    }
+    
+    let chunks = chunk_text(&full_text, 4000);
+    
+    // Ensure we have enough messages for the final flush
+    while sent_messages.len() < chunks.len() {
+        if let Ok(new_msg) = bot.send_message(chat_id, "⏳...").await {
+            sent_messages.push(new_msg.id);
+        } else {
+            break;
+        }
+    }
+    
+    for (i, chunk) in chunks.iter().enumerate() {
+        if i < sent_messages.len() {
+            // Convert simple markdown to HTML and parse
+            let html_chunk = markdown_to_html(chunk);
+            let res = bot.edit_message_text(chat_id, sent_messages[i], html_chunk)
+                .parse_mode(ParseMode::Html)
+                .await;
+                
+            if res.is_err() {
+                // Fallback to unformatted plain text if parsing breaks
+                let _ = bot.edit_message_text(chat_id, sent_messages[i], chunk).await;
+            }
+        }
     }
     
     Ok(())

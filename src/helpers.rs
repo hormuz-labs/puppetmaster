@@ -104,6 +104,8 @@ pub fn render_html_chunks(thinking: &str, answer: &str, thinking_header: &str) -
             
             let mut processed_line = String::new();
             let mut in_inline_code = false;
+            let mut in_bold = false;
+            let mut in_italic = false;
             let mut chars = line.chars().peekable();
             
             while let Some(c) = chars.next() {
@@ -113,6 +115,23 @@ pub fn render_html_chunks(thinking: &str, answer: &str, thinking_header: &str) -
                         processed_line.push_str("<code>");
                     } else {
                         processed_line.push_str("</code>");
+                    }
+                } else if c == '*' && !in_code_block && !in_inline_code {
+                    if let Some(&'*') = chars.peek() {
+                        chars.next(); // Consume second '*'
+                        in_bold = !in_bold;
+                        if in_bold {
+                            processed_line.push_str("<b>");
+                        } else {
+                            processed_line.push_str("</b>");
+                        }
+                    } else {
+                        in_italic = !in_italic;
+                        if in_italic {
+                            processed_line.push_str("<i>");
+                        } else {
+                            processed_line.push_str("</i>");
+                        }
                     }
                 } else if c == '<' {
                     processed_line.push_str("&lt;");

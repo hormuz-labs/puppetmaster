@@ -1,5 +1,4 @@
-.agent
-.agents
-.claude
+.agents/
+.claude/
 target/
 .env

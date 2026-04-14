@@ -61,3 +61,8 @@ node_modules/
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+
+
+# Added by cargo
+
+/target

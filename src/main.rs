@@ -2,6 +2,7 @@ mod state;
 mod helpers;
 mod handlers;
 mod markdown;
+mod config;
 
 use std::env;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use crate::state::{State, Command};
 use crate::handlers::*;
+use crate::config::AppConfig;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -32,9 +34,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot_token = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN must be set");
     let server_url = env::var("OPENCODE_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:4096".to_string());
     
+    // Load config
+    let app_config = Arc::new(AppConfig::from_env());
+    
     info!("Starting OpenCode Telegram Bot (Stage 3)...");
     
     let bot = Bot::new(bot_token);
+    
+    // Get bot info (needed for group mentions)
+    let me = bot.get_me().await.expect("Failed to get bot info");
+    let me = Arc::new(me);
     
     // Set up the Telegram bot menu
     use teloxide::utils::command::BotCommands;
@@ -50,7 +59,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .dependencies(dptree::deps![
             InMemStorage::<State>::new(),
             http_client,
-            server_url
+            server_url,
+            app_config,
+            me
         ])
         .enable_ctrlc_handler()
         .build()
@@ -58,6 +69,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
 
     Ok(())
+}
+
+async fn access_control_filter(
+    bot: Bot,
+    msg: Message,
+    config: Arc<AppConfig>,
+    me: Arc<teloxide::types::Me>,
+) -> bool {
+    // First check group rules (allows us to silently ignore non-targeted group chat messages)
+    if msg.chat.is_group() || msg.chat.is_supergroup() {
+        if !config.allow_in_groups {
+            return false;
+        }
+
+        let is_mentioned = msg.text()
+            .map(|t| t.contains(&format!("@{}", me.user.username.as_deref().unwrap_or(""))))
+            .unwrap_or(false);
+            
+        let is_reply_to_bot = msg.reply_to_message()
+            .and_then(|m| m.from.as_ref())
+            .map(|u| u.id == me.user.id)
+            .unwrap_or(false);
+
+        // Allow commands starting with '/' that mention the bot (e.g. /start@bot)
+        let is_command_for_bot = msg.text()
+            .map(|t| t.starts_with('/') && t.contains(&format!("@{}", me.user.username.as_deref().unwrap_or(""))))
+            .unwrap_or(false);
+
+        if !is_mentioned && !is_reply_to_bot && !is_command_for_bot {
+            return false;
+        }
+    }
+
+    // Now check if the user is authorized to interact with the bot
+    let user_id = match msg.from.as_ref() {
+        Some(user) => user.id.0,
+        None => return false,
+    };
+
+    let is_authorized = match &config.allowed_users {
+        crate::config::AccessControl::All => true,
+        crate::config::AccessControl::Restricted(ids) => ids.contains(&user_id),
+    };
+
+    if !is_authorized {
+        let _ = bot.send_message(msg.chat.id, &config.unauthorized_message).await;
+        return false;
+    }
+
+    true
 }
 
 fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
@@ -74,6 +135,7 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         ;
 
     let message_handler = Update::filter_message()
+        .filter_async(access_control_filter)
         .branch(command_handler)
         // Interpret menu button clicks as commands
         .branch(case![State::AwaitingProjectDir { prev_session_id, prev_directory, model }].endpoint(receive_project_dir))

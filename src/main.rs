@@ -138,94 +138,144 @@ fn main_menu_keyboard() -> KeyboardMarkup {
     .resize_keyboard()
 }
 
-fn markdown_to_html(md: &str) -> String {
-    // A simple, best-effort markdown to HTML converter to make code blocks look nice
-    let mut html = String::new();
-    let mut in_code_block = false;
-    
-    for line in md.split('\n') {
-        if line.starts_with("```") {
-            in_code_block = !in_code_block;
-            if in_code_block {
-                let lang = line.trim_start_matches("```").trim();
-                if !lang.is_empty() {
-                    html.push_str(&format!("<pre><code class=\"language-{}\">", lang));
-                } else {
-                    html.push_str("<pre><code>");
-                }
-            } else {
-                html.push_str("</code></pre>\n");
-            }
-            continue;
-        }
-        
-        let mut processed_line = String::new();
-        let mut in_inline_code = false;
-        let mut chars = line.chars().peekable();
-        
-        while let Some(c) = chars.next() {
-            if c == '`' && !in_code_block {
-                in_inline_code = !in_inline_code;
-                if in_inline_code {
-                    processed_line.push_str("<code>");
-                } else {
-                    processed_line.push_str("</code>");
-                }
-            } else if c == '<' {
-                processed_line.push_str("&lt;");
-            } else if c == '>' {
-                processed_line.push_str("&gt;");
-            } else if c == '&' {
-                processed_line.push_str("&amp;");
-            } else {
-                processed_line.push(c);
-            }
-        }
-        
-        html.push_str(&processed_line);
-        html.push('\n');
-    }
-    
-    if in_code_block {
-        html.push_str("</code></pre>");
-    }
-    
-    html
-}
-
-fn chunk_text(text: &str, limit: usize) -> Vec<String> {
+fn render_html_chunks(thinking: &str, answer: &str, thinking_header: &str) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut current_chunk = String::new();
+    let limit = 3900;
     
-    for line in text.split('\n') {
-        if current_chunk.len() + line.len() + 1 > limit {
-            if !current_chunk.is_empty() {
+    // 1. Process Thinking Text
+    if !thinking.trim().is_empty() {
+        let open_tag = format!("<blockquote expandable><b>{}</b>\n", thinking_header);
+        let close_tag = "</blockquote>\n\n";
+        
+        current_chunk.push_str(&open_tag);
+        
+        for line in thinking.split('\n') {
+            let escaped = escape_html(line);
+            
+            if current_chunk.len() + escaped.len() + close_tag.len() > limit {
+                current_chunk.push_str("</blockquote>");
                 chunks.push(current_chunk.clone());
                 current_chunk.clear();
+                current_chunk.push_str(&open_tag);
             }
             
-            // If a single line is longer than the limit (rare, but possible)
-            if line.len() > limit {
+            // If a single line is still too long, force split it
+            if escaped.len() > limit {
                 let mut i = 0;
-                while i < line.len() {
-                    let end = std::cmp::min(i + limit, line.len());
-                    chunks.push(line[i..end].to_string());
-                    i += limit;
+                while i < escaped.len() {
+                    let end = std::cmp::min(i + limit - close_tag.len() - open_tag.len() - 10, escaped.len());
+                    current_chunk.push_str(&escaped[i..end]);
+                    if end < escaped.len() {
+                        current_chunk.push_str("</blockquote>");
+                        chunks.push(current_chunk.clone());
+                        current_chunk.clear();
+                        current_chunk.push_str(&open_tag);
+                    }
+                    i = end;
+                }
+                current_chunk.push('\n');
+                continue;
+            }
+            
+            current_chunk.push_str(&escaped);
+            current_chunk.push('\n');
+        }
+        current_chunk.push_str(close_tag);
+    }
+    
+    // 2. Process Answer Text
+    if !answer.trim().is_empty() {
+        let mut in_code_block = false;
+        let mut current_lang = String::new();
+        
+        for line in answer.split('\n') {
+            if line.starts_with("```") {
+                in_code_block = !in_code_block;
+                if in_code_block {
+                    current_lang = line.trim_start_matches("```").trim().to_string();
+                    let tag = if !current_lang.is_empty() {
+                        format!("<pre><code class=\"language-{}\">", current_lang)
+                    } else {
+                        "<pre><code>".to_string()
+                    };
+                    
+                    if current_chunk.len() + tag.len() > limit {
+                        chunks.push(current_chunk.clone());
+                        current_chunk.clear();
+                    }
+                    current_chunk.push_str(&tag);
+                } else {
+                    let tag = "</code></pre>\n";
+                    if current_chunk.len() + tag.len() > limit {
+                        current_chunk.push_str("</code></pre>");
+                        chunks.push(current_chunk.clone());
+                        current_chunk.clear();
+                    } else {
+                        current_chunk.push_str(tag);
+                    }
                 }
                 continue;
             }
+            
+            let mut processed_line = String::new();
+            let mut in_inline_code = false;
+            let mut chars = line.chars().peekable();
+            
+            while let Some(c) = chars.next() {
+                if c == '`' && !in_code_block {
+                    in_inline_code = !in_inline_code;
+                    if in_inline_code {
+                        processed_line.push_str("<code>");
+                    } else {
+                        processed_line.push_str("</code>");
+                    }
+                } else if c == '<' {
+                    processed_line.push_str("&lt;");
+                } else if c == '>' {
+                    processed_line.push_str("&gt;");
+                } else if c == '&' {
+                    processed_line.push_str("&amp;");
+                } else {
+                    processed_line.push(c);
+                }
+            }
+            processed_line.push('\n');
+            
+            if current_chunk.len() + processed_line.len() > limit {
+                if in_code_block {
+                    current_chunk.push_str("</code></pre>");
+                }
+                chunks.push(current_chunk.clone());
+                current_chunk.clear();
+                if in_code_block {
+                    let tag = if !current_lang.is_empty() {
+                        format!("<pre><code class=\"language-{}\">", current_lang)
+                    } else {
+                        "<pre><code>".to_string()
+                    };
+                    current_chunk.push_str(&tag);
+                }
+            }
+            current_chunk.push_str(&processed_line);
         }
-        if !current_chunk.is_empty() {
-            current_chunk.push('\n');
+        
+        if in_code_block {
+            current_chunk.push_str("</code></pre>");
         }
-        current_chunk.push_str(line);
+    } else if answer.trim().is_empty() && thinking.trim().is_empty() {
+        // Nothing at all
+    } else if answer.trim().is_empty() && !thinking.trim().is_empty() {
+        current_chunk.push_str("✅ Done (Thinking only)");
     }
-    if !current_chunk.is_empty() {
+    
+    if !current_chunk.trim().is_empty() {
         chunks.push(current_chunk);
     }
     if chunks.is_empty() {
         chunks.push(String::new());
     }
+    
     chunks
 }
 
@@ -639,43 +689,32 @@ async fn handle_prompt(
                                     answer_text.push_str(delta);
                                 }
                                 
-                                // Edit message once per second to avoid rate limits
                                 if last_edit.elapsed() > Duration::from_secs(1) {
-                                    let mut full_display = String::new();
-                                    if !thinking_text.trim().is_empty() {
-                                        let frame = match (last_edit.elapsed().as_millis() / 500) % 3 {
-                                            0 => "⏳ Thinking.",
-                                            1 => "⏳ Thinking..",
-                                            _ => "⏳ Thinking...",
-                                        };
-                                        full_display.push_str(&format!("<blockquote expandable><b>{}</b>\n", frame));
-                                        full_display.push_str(&escape_html(thinking_text.trim()));
-                                        full_display.push_str("</blockquote>\n\n");
-                                    }
-                                    if !answer_text.trim().is_empty() {
-                                        full_display.push_str(&markdown_to_html(&answer_text));
-                                    } else if !thinking_text.trim().is_empty() {
-                                        full_display.push_str("⏳...");
-                                    }
+                                    let frame = match (last_edit.elapsed().as_millis() / 500) % 3 {
+                                        0 => "⏳ Thinking.",
+                                        1 => "⏳ Thinking..",
+                                        _ => "⏳ Thinking...",
+                                    };
+                                    let chunks = render_html_chunks(&thinking_text, &answer_text, frame);
 
-                                    if !full_display.trim().is_empty() {
-                                        let chunks = chunk_text(&full_display, 4000);
-                                        
-                                        // Ensure we have enough messages to display all chunks
-                                        while sent_messages.len() < chunks.len() {
-                                            if let Ok(new_msg) = bot.send_message(chat_id, "⏳...").await {
-                                                sent_messages.push(new_msg.id);
-                                            } else {
-                                                break;
+                                    if let Some(last_chunk) = chunks.last() {
+                                        if !last_chunk.trim().is_empty() {
+                                            // Ensure we have enough messages to display all chunks
+                                            while sent_messages.len() < chunks.len() {
+                                                if let Ok(new_msg) = bot.send_message(chat_id, "⏳...").await {
+                                                    sent_messages.push(new_msg.id);
+                                                } else {
+                                                    break;
+                                                }
                                             }
+                                            
+                                            // Only edit the last chunk during streaming for better performance
+                                            let last_chunk_index = chunks.len() - 1;
+                                            let last_msg_id = sent_messages[last_chunk_index];
+                                            let _ = bot.edit_message_text(chat_id, last_msg_id, last_chunk)
+                                                .parse_mode(ParseMode::Html)
+                                                .await;
                                         }
-                                        
-                                        // Only edit the last chunk during streaming for better performance
-                                        let last_chunk_index = chunks.len() - 1;
-                                        let last_msg_id = sent_messages[last_chunk_index];
-                                        let _ = bot.edit_message_text(chat_id, last_msg_id, &chunks[last_chunk_index])
-                                            .parse_mode(ParseMode::Html)
-                                            .await;
                                     }
                                     last_edit = Instant::now();
                                 }
@@ -706,27 +745,12 @@ async fn handle_prompt(
     // Final flush and close SSE
     es.close();
     
-    let mut full_display = String::new();
+    let chunks = render_html_chunks(&thinking_text, &answer_text, "💭 Thinking completed");
     
-    if !thinking_text.trim().is_empty() {
-        full_display.push_str("<blockquote expandable><b>💭 Thinking completed</b>\n");
-        full_display.push_str(&escape_html(thinking_text.trim()));
-        full_display.push_str("</blockquote>\n\n");
+    if chunks.len() == 1 && chunks[0].trim().is_empty() {
+        let _ = bot.edit_message_text(chat_id, sent_messages[0], "✅ Done (No text output)").await;
+        return Ok(());
     }
-    
-    if answer_text.trim().is_empty() {
-        if thinking_text.trim().is_empty() {
-            let _ = bot.edit_message_text(chat_id, sent_messages[0], "✅ Done (No text output)").await;
-            return Ok(());
-        } else {
-            // Only had thinking
-            full_display.push_str("✅ Done (Thinking only)");
-        }
-    } else {
-        full_display.push_str(&markdown_to_html(&answer_text));
-    }
-    
-    let chunks = chunk_text(&full_display, 4000);
     
     // Ensure we have enough messages for the final flush
     while sent_messages.len() < chunks.len() {

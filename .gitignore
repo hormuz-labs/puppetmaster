@@ -1,4 +1,5 @@
 .agent
 .agents
 .claude
-target
+target/
+.env

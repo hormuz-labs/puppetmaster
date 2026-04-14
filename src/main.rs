@@ -69,7 +69,9 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(case![Command::Session].endpoint(session_command))
         .branch(case![Command::Project].endpoint(project_command))
         .branch(case![Command::Model].endpoint(model_command))
-        .branch(case![Command::Abort].endpoint(abort_command));
+        .branch(case![Command::Abort].endpoint(abort_command))
+        .branch(case![Command::Fetch(path)].endpoint(fetch_command))
+        ;
 
     let message_handler = Update::filter_message()
         .branch(command_handler)
@@ -80,6 +82,7 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(dptree::filter(|msg: Message| msg.text() == Some("📁 Set Project")).endpoint(project_command_text))
         .branch(dptree::filter(|msg: Message| msg.text() == Some("🤖 Change Model")).endpoint(model_command_text))
         .branch(dptree::filter(|msg: Message| msg.text() == Some("❓ Help")).endpoint(help_command))
+        .branch(dptree::filter(|msg: Message| msg.text().unwrap_or("").starts_with("!")).endpoint(bash_command))
         .branch(case![State::ActiveSession { session_id, directory, model }].endpoint(handle_prompt))
         .branch(dptree::endpoint(handle_no_session));
 

@@ -625,3 +625,113 @@ pub async fn abort_command(bot: Bot, msg: Message, dialogue: MyDialogue, client:
     
     Ok(())
 }
+
+pub async fn fetch_command(bot: Bot, msg: Message, dialogue: MyDialogue, path: String) -> HandlerResult {
+    let state = dialogue.get().await?.unwrap_or_default();
+    let current_dir = match state {
+        State::ActiveSession { directory, .. } => directory,
+        State::AwaitingModel { directory, .. } => directory,
+        State::AwaitingProjectDir { prev_directory, .. } => prev_directory,
+        _ => None,
+    };
+    
+    if path.trim().is_empty() {
+        bot.send_message(msg.chat.id, "Please provide a file path. Example: /fetch src/main.rs").await?;
+        return Ok(());
+    }
+
+    let mut filepath = std::path::PathBuf::from(path.trim());
+    if !filepath.is_absolute() {
+        if let Some(dir) = current_dir {
+            filepath = std::path::PathBuf::from(dir).join(filepath);
+        } else {
+            filepath = std::env::current_dir().unwrap_or_default().join(filepath);
+        }
+    }
+
+    if !filepath.exists() {
+        bot.send_message(msg.chat.id, format!("❌ File not found: {}", filepath.display())).await?;
+        return Ok(());
+    }
+
+    if filepath.is_dir() {
+        bot.send_message(msg.chat.id, format!("❌ Path is a directory, not a file: {}", filepath.display())).await?;
+        return Ok(());
+    }
+
+    let file = teloxide::types::InputFile::file(&filepath);
+    let extension = filepath.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let is_image = ["png", "jpg", "jpeg", "gif", "webp", "bmp"].contains(&extension.as_str());
+    
+    if is_image {
+        if let Err(e) = bot.send_photo(msg.chat.id, file).await {
+            bot.send_message(msg.chat.id, format!("❌ Failed to send image: {}", e)).await?;
+        }
+    } else {
+        if let Err(e) = bot.send_document(msg.chat.id, file).await {
+            bot.send_message(msg.chat.id, format!("❌ Failed to send document: {}", e)).await?;
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn bash_command(bot: Bot, msg: Message, dialogue: MyDialogue) -> HandlerResult {
+    let state = dialogue.get().await?.unwrap_or_default();
+    let current_dir = match state {
+        State::ActiveSession { directory, .. } => directory,
+        State::AwaitingModel { directory, .. } => directory,
+        State::AwaitingProjectDir { prev_directory, .. } => prev_directory,
+        _ => None,
+    };
+    
+    let text = msg.text().unwrap_or("");
+    let cmd = text.trim_start_matches('!').trim().to_string();
+
+    if cmd.is_empty() {
+        bot.send_message(msg.chat.id, "Please provide a command. Example: !ls -la").await?;
+        return Ok(());
+    }
+
+    let mut command = tokio::process::Command::new("sh");
+    command.arg("-c").arg(&cmd);
+    
+    if let Some(ref dir) = current_dir {
+        command.current_dir(dir);
+    }
+
+    let bot_msg = bot.send_message(msg.chat.id, format!("⏳ Executing `{}`...", cmd)).await?;
+
+    match command.output().await {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            
+            let mut combined_output = String::new();
+            if !stdout.is_empty() {
+                combined_output.push_str(&format!("<b>STDOUT:</b>\n<pre><code class=\"language-bash\">{}</code></pre>\n", crate::helpers::escape_html(&stdout)));
+            }
+            if !stderr.is_empty() {
+                combined_output.push_str(&format!("<b>STDERR:</b>\n<pre><code class=\"language-bash\">{}</code></pre>\n", crate::helpers::escape_html(&stderr)));
+            }
+            
+            if combined_output.is_empty() {
+                combined_output = "✅ Command executed successfully with no output.".to_string();
+            }
+
+            // Telegram has a 4096 character limit
+            if combined_output.len() > 3900 {
+                // Truncate to avoid blowing up the message limit
+                combined_output.truncate(3900);
+                combined_output.push_str("... (truncated)</code></pre>");
+            }
+
+            let _ = bot.edit_message_text(msg.chat.id, bot_msg.id, combined_output).parse_mode(ParseMode::Html).await;
+        }
+        Err(e) => {
+            let _ = bot.edit_message_text(msg.chat.id, bot_msg.id, format!("❌ Failed to execute command: {}", e)).await;
+        }
+    }
+
+    Ok(())
+}

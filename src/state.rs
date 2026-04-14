@@ -38,4 +38,6 @@ pub enum Command {
     Model,
     #[command(description = "Abort the current generation.")]
     Abort,
+    #[command(description = "Fetch a file from the host machine and send it.")]
+    Fetch(String),
 }

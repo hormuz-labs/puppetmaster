@@ -1,3 +1,4 @@
+cat << 'INNER_EOF' > README.md
 # OpenCode Telegram Interface
 
 [![Rust Version](https://img.shields.io/badge/rust-1.80%2B-blue.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
@@ -136,3 +137,4 @@ Alternatively, utilize the persistent bottom keyboard menu for single-tap naviga
 
 ---
 ⭐️ **Don't forget to star the repo if this was useful to you!** ⭐️
+INNER_EOF

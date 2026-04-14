@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -9,7 +10,7 @@ use serde_json::{json, Value};
 use teloxide::{
     dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler},
     prelude::*,
-    types::{KeyboardButton, KeyboardRemove, KeyboardMarkup, MessageId, ParseMode},
+    types::{KeyboardButton, KeyboardRemove, KeyboardMarkup, ParseMode},
     utils::command::BotCommands,
 };
 use tracing::{error, info, Level};
@@ -603,7 +604,9 @@ async fn handle_prompt(
         }
     }
     
-    let mut full_text = String::new();
+    let mut thinking_text = String::new();
+    let mut answer_text = String::new();
+    let mut part_types = HashMap::<String, String>::new();
     let mut sent_messages = vec![bot_msg.id];
     let mut last_edit = Instant::now();
     
@@ -618,14 +621,45 @@ async fn handle_prompt(
                     let properties = &data["properties"];
                     
                     match event_type {
+                        "message.part.updated" => {
+                            if let (Some(pid), Some(ptype)) = (properties["part"]["id"].as_str(), properties["part"]["type"].as_str()) {
+                                part_types.insert(pid.to_string(), ptype.to_string());
+                            }
+                        }
                         "message.part.delta" => {
-                            if let Some(delta) = properties["delta"].as_str() {
-                                full_text.push_str(delta);
+                            let part_id = properties["partID"].as_str().unwrap_or("");
+                            let delta = properties["delta"].as_str().unwrap_or("");
+                            let field = properties["field"].as_str().unwrap_or("");
+
+                            if field == "text" || field == "reasoning" {
+                                let part_type = part_types.get(part_id).map(|s| s.as_str()).unwrap_or("text");
+                                if part_type == "reasoning" || field == "reasoning" {
+                                    thinking_text.push_str(delta);
+                                } else {
+                                    answer_text.push_str(delta);
+                                }
                                 
                                 // Edit message once per second to avoid rate limits
                                 if last_edit.elapsed() > Duration::from_secs(1) {
-                                    if !full_text.trim().is_empty() {
-                                        let chunks = chunk_text(&full_text, 4000);
+                                    let mut full_display = String::new();
+                                    if !thinking_text.trim().is_empty() {
+                                        let frame = match (last_edit.elapsed().as_millis() / 500) % 3 {
+                                            0 => "⏳ Thinking.",
+                                            1 => "⏳ Thinking..",
+                                            _ => "⏳ Thinking...",
+                                        };
+                                        full_display.push_str(&format!("<blockquote expandable><b>{}</b>\n", frame));
+                                        full_display.push_str(&escape_html(thinking_text.trim()));
+                                        full_display.push_str("</blockquote>\n\n");
+                                    }
+                                    if !answer_text.trim().is_empty() {
+                                        full_display.push_str(&markdown_to_html(&answer_text));
+                                    } else if !thinking_text.trim().is_empty() {
+                                        full_display.push_str("⏳...");
+                                    }
+
+                                    if !full_display.trim().is_empty() {
+                                        let chunks = chunk_text(&full_display, 4000);
                                         
                                         // Ensure we have enough messages to display all chunks
                                         while sent_messages.len() < chunks.len() {
@@ -639,7 +673,9 @@ async fn handle_prompt(
                                         // Only edit the last chunk during streaming for better performance
                                         let last_chunk_index = chunks.len() - 1;
                                         let last_msg_id = sent_messages[last_chunk_index];
-                                        let _ = bot.edit_message_text(chat_id, last_msg_id, &chunks[last_chunk_index]).await;
+                                        let _ = bot.edit_message_text(chat_id, last_msg_id, &chunks[last_chunk_index])
+                                            .parse_mode(ParseMode::Html)
+                                            .await;
                                     }
                                     last_edit = Instant::now();
                                 }
@@ -652,7 +688,7 @@ async fn handle_prompt(
                         "session.error" => {
                             let err_msg = properties.to_string();
                             error!("Session error: {}", err_msg);
-                            full_text.push_str(&format!("\n\n❌ Session Error: {}", err_msg));
+                            answer_text.push_str(&format!("\n\n❌ Session Error: {}", err_msg));
                             break;
                         }
                         _ => {}
@@ -661,7 +697,7 @@ async fn handle_prompt(
             }
             Err(err) => {
                 error!("SSE Stream Error: {}", err);
-                full_text.push_str("\n\n⚠️ Stream interrupted.");
+                answer_text.push_str("\n\n⚠️ Stream interrupted.");
                 break;
             }
         }
@@ -670,12 +706,27 @@ async fn handle_prompt(
     // Final flush and close SSE
     es.close();
     
-    if full_text.trim().is_empty() {
-        let _ = bot.edit_message_text(chat_id, sent_messages[0], "✅ Done (No text output)").await;
-        return Ok(());
+    let mut full_display = String::new();
+    
+    if !thinking_text.trim().is_empty() {
+        full_display.push_str("<blockquote expandable><b>💭 Thinking completed</b>\n");
+        full_display.push_str(&escape_html(thinking_text.trim()));
+        full_display.push_str("</blockquote>\n\n");
     }
     
-    let chunks = chunk_text(&full_text, 4000);
+    if answer_text.trim().is_empty() {
+        if thinking_text.trim().is_empty() {
+            let _ = bot.edit_message_text(chat_id, sent_messages[0], "✅ Done (No text output)").await;
+            return Ok(());
+        } else {
+            // Only had thinking
+            full_display.push_str("✅ Done (Thinking only)");
+        }
+    } else {
+        full_display.push_str(&markdown_to_html(&answer_text));
+    }
+    
+    let chunks = chunk_text(&full_display, 4000);
     
     // Ensure we have enough messages for the final flush
     while sent_messages.len() < chunks.len() {
@@ -688,9 +739,7 @@ async fn handle_prompt(
     
     for (i, chunk) in chunks.iter().enumerate() {
         if i < sent_messages.len() {
-            // Convert simple markdown to HTML and parse
-            let html_chunk = markdown_to_html(chunk);
-            let res = bot.edit_message_text(chat_id, sent_messages[i], html_chunk)
+            let res = bot.edit_message_text(chat_id, sent_messages[i], chunk)
                 .parse_mode(ParseMode::Html)
                 .await;
                 
@@ -702,4 +751,10 @@ async fn handle_prompt(
     }
     
     Ok(())
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

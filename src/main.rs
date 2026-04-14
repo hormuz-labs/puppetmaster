@@ -29,6 +29,7 @@ pub enum State {
     },
     AwaitingProjectDir {
         prev_session_id: Option<String>,
+        prev_directory: Option<String>,
         model: Option<String>,
     },
     AwaitingModel {
@@ -106,8 +107,13 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
 
     let message_handler = Update::filter_message()
         .branch(command_handler)
-        .branch(case![State::AwaitingProjectDir { prev_session_id, model }].endpoint(receive_project_dir))
+        // Interpret menu button clicks as commands
+        .branch(case![State::AwaitingProjectDir { prev_session_id, prev_directory, model }].endpoint(receive_project_dir))
         .branch(case![State::AwaitingModel { session_id, directory }].endpoint(receive_model))
+        .branch(dptree::filter(|msg: Message| msg.text() == Some("🔄 New Session")).endpoint(session_command_text))
+        .branch(dptree::filter(|msg: Message| msg.text() == Some("📁 Set Project")).endpoint(project_command_text))
+        .branch(dptree::filter(|msg: Message| msg.text() == Some("🤖 Change Model")).endpoint(model_command_text))
+        .branch(dptree::filter(|msg: Message| msg.text() == Some("❓ Help")).endpoint(help_command))
         .branch(case![State::ActiveSession { session_id, directory, model }].endpoint(handle_prompt))
         .branch(dptree::endpoint(handle_no_session));
 
@@ -116,6 +122,20 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
 }
 
 // --- Helpers ---
+
+fn main_menu_keyboard() -> KeyboardMarkup {
+    KeyboardMarkup::new(vec![
+        vec![
+            KeyboardButton::new("🔄 New Session"),
+            KeyboardButton::new("📁 Set Project"),
+        ],
+        vec![
+            KeyboardButton::new("🤖 Change Model"),
+            KeyboardButton::new("❓ Help"),
+        ],
+    ])
+    .resize_keyboard()
+}
 
 async fn create_session(client: &Client, server_url: &str, directory: Option<&str>) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let mut req = client.post(format!("{}/session", server_url));
@@ -142,7 +162,9 @@ async fn help_command(bot: Bot, msg: Message) -> HandlerResult {
 
 async fn start_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
     let chat_id = msg.chat.id;
-    bot.send_message(chat_id, "Welcome to OpenCode! Creating your first session...").await?;
+    bot.send_message(chat_id, "Welcome to OpenCode! Creating your first session...")
+        .reply_markup(main_menu_keyboard())
+        .await?;
     
     match create_session(&client, &server_url, None).await {
         Ok(session_id) => {
@@ -159,6 +181,18 @@ async fn start_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: Cli
     }
     
     Ok(())
+}
+
+async fn session_command_text(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
+    session_command(bot, msg, dialogue, client, server_url).await
+}
+
+async fn project_command_text(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
+    project_command(bot, msg, dialogue, client, server_url).await
+}
+
+async fn model_command_text(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
+    model_command(bot, msg, dialogue, client, server_url).await
 }
 
 async fn session_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
@@ -192,18 +226,55 @@ async fn session_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: C
     Ok(())
 }
 
-async fn project_command(bot: Bot, msg: Message, dialogue: MyDialogue) -> HandlerResult {
+async fn project_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
     let state = dialogue.get().await?.unwrap_or_default();
     
-    let (prev_session_id, model) = match state {
-        State::ActiveSession { session_id, model, .. } => (Some(session_id), model),
-        State::AwaitingProjectDir { prev_session_id, model } => (prev_session_id, model),
-        State::AwaitingModel { session_id, .. } => (session_id, None),
-        _ => (None, None),
+    let (prev_session_id, prev_directory, model) = match state {
+        State::ActiveSession { session_id, directory, model } => (Some(session_id), directory, model),
+        State::AwaitingProjectDir { prev_session_id, prev_directory, model } => (prev_session_id, prev_directory, model),
+        State::AwaitingModel { session_id, directory } => (session_id, directory, None),
+        _ => (None, None, None),
     };
 
-    bot.send_message(msg.chat.id, "Please send the absolute path to your project directory:").await?;
-    dialogue.update(State::AwaitingProjectDir { prev_session_id, model }).await?;
+    // Fetch available projects from OpenCode
+    let mut keyboard_rows = vec![];
+    
+    if let Ok(res) = client.get(format!("{}/project", server_url)).send().await {
+        if let Ok(projects) = res.json::<Vec<Value>>().await {
+            // Sort projects by updated time (newest first)
+            let mut sorted_projects = projects;
+            sorted_projects.sort_by(|a, b| {
+                let time_a = a["time"]["updated"].as_i64().unwrap_or(0);
+                let time_b = b["time"]["updated"].as_i64().unwrap_or(0);
+                time_b.cmp(&time_a) // Descending
+            });
+            
+            // Take top 10 recent projects to not overwhelm the keyboard
+            for proj in sorted_projects.iter().take(10) {
+                if let Some(worktree) = proj["worktree"].as_str() {
+                    if worktree != "/" {
+                        keyboard_rows.push(vec![KeyboardButton::new(worktree.to_string())]);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Add an option to type manually if they want, and a go back option
+    keyboard_rows.push(vec![
+        KeyboardButton::new("🔙 Cancel / Go Back"),
+        KeyboardButton::new("⌨️ Type manually"),
+    ]);
+
+    let keyboard = KeyboardMarkup::new(keyboard_rows)
+        .resize_keyboard()
+        .one_time_keyboard();
+
+    bot.send_message(msg.chat.id, "Please select a recent project directory, or type an absolute path:")
+        .reply_markup(keyboard)
+        .await?;
+        
+    dialogue.update(State::AwaitingProjectDir { prev_session_id, prev_directory, model }).await?;
     
     Ok(())
 }
@@ -212,14 +283,37 @@ async fn receive_project_dir(
     bot: Bot, 
     msg: Message, 
     dialogue: MyDialogue, 
-    (prev_session_id, model): (Option<String>, Option<String>), 
+    (prev_session_id, prev_directory, model): (Option<String>, Option<String>, Option<String>), 
     client: Client, 
     server_url: Arc<String>
 ) -> HandlerResult {
     let dir = msg.text().unwrap_or("").to_string();
     
-    bot.send_message(msg.chat.id, format!("Setting project directory to `{}` and creating a new session...", dir)).await?;
+    if dir.contains("Cancel / Go Back") {
+        let bot_msg = bot.send_message(msg.chat.id, "Going back...")
+            .reply_markup(main_menu_keyboard())
+            .await?;
+        let _ = bot.delete_message(msg.chat.id, bot_msg.id).await;
+        
+        if let Some(sid) = prev_session_id {
+            dialogue.update(State::ActiveSession { session_id: sid, directory: prev_directory, model }).await?;
+        } else {
+            dialogue.update(State::Start).await?;
+        }
+        return Ok(());
+    }
     
+    if dir.contains("Type manually") {
+        bot.send_message(msg.chat.id, "Okay, please type the absolute path manually.")
+            .reply_markup(KeyboardRemove::new())
+            .await?;
+        return Ok(());
+    }
+    
+    bot.send_message(msg.chat.id, format!("Setting project directory to `{}` and creating a new session...", dir))
+        .reply_markup(main_menu_keyboard())
+        .await?;
+        
     match create_session(&client, &server_url, Some(&dir)).await {
         Ok(session_id) => {
             bot.send_message(msg.chat.id, format!("✅ Project set! Created new session: `{}`", session_id)).await?;
@@ -288,6 +382,8 @@ async fn model_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: Cli
     if !current_row.is_empty() {
         keyboard_rows.push(current_row);
     }
+    
+    keyboard_rows.push(vec![KeyboardButton::new("🔙 Cancel / Go Back")]);
 
     let keyboard = KeyboardMarkup::new(keyboard_rows)
         .resize_keyboard()
@@ -310,9 +406,24 @@ async fn receive_model(
 ) -> HandlerResult {
     let model = msg.text().unwrap_or("").to_string();
     
+    if model.contains("Cancel / Go Back") {
+        let bot_msg = bot.send_message(msg.chat.id, "Going back...")
+            .reply_markup(main_menu_keyboard())
+            .await?;
+        let _ = bot.delete_message(msg.chat.id, bot_msg.id).await;
+            
+        if let Some(sid) = session_id {
+            // Need to retrieve original model somehow? For now, None, or we would need to store prev_model
+            dialogue.update(State::ActiveSession { session_id: sid, directory, model: None }).await?;
+        } else {
+            dialogue.update(State::Start).await?;
+        }
+        return Ok(());
+    }
+    
     if let Some(sid) = session_id {
         bot.send_message(msg.chat.id, format!("✅ Active model set to: `{}`", model))
-            .reply_markup(KeyboardRemove::new())
+            .reply_markup(main_menu_keyboard())
             .await?;
             
         dialogue.update(State::ActiveSession { 
@@ -322,7 +433,7 @@ async fn receive_model(
         }).await?;
     } else {
         bot.send_message(msg.chat.id, "✅ Model set. Please use /start or /session to create a session first.")
-            .reply_markup(KeyboardRemove::new())
+            .reply_markup(main_menu_keyboard())
             .await?;
             
         dialogue.update(State::Start).await?; 

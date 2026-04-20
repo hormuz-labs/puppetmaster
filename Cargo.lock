@@ -1013,26 +1013,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
-name = "opencode-telegram-bot-rs"
-version = "0.1.0"
-dependencies = [
- "base64",
- "dotenvy",
- "futures-util",
- "pulldown-cmark",
- "reqwest",
- "reqwest-eventsource",
- "serde",
- "serde_json",
- "teloxide",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "unicodeit",
- "urlencoding",
-]
-
-[[package]]
 name = "openssl"
 version = "0.10.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1197,6 +1177,26 @@ name = "pulldown-cmark-escape"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
+
+[[package]]
+name = "puppetmaster"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "dotenvy",
+ "futures-util",
+ "pulldown-cmark",
+ "reqwest",
+ "reqwest-eventsource",
+ "serde",
+ "serde_json",
+ "teloxide",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "unicodeit",
+ "urlencoding",
+]
 
 [[package]]
 name = "quote"

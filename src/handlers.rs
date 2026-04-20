@@ -326,6 +326,7 @@ pub async fn handle_prompt(
     }
 
     if let Some(voice) = msg.voice() {
+        info!("Processing voice message...");
         let bot_msg = bot.send_message(chat_id, "🎙 Processing voice message...").await?;
         let google_api_key = env::var("GOOGLE_SPEECH_API_KEY").unwrap_or_else(|_| env::var("GOOGLE_API_KEY").unwrap_or_default());
         if google_api_key.is_empty() {
@@ -387,7 +388,7 @@ pub async fn handle_prompt(
                             if let Some(first_alt) = alternatives.first() {
                                 if let Some(transcript) = first_alt["transcript"].as_str() {
                                     text_content = transcript.to_string();
-                                    let _ = bot.edit_message_text(chat_id, bot_msg.id, format!("🎙 Transcribed:\n\n_{}_", text_content)).parse_mode(ParseMode::Markdown).await;
+                                    let _ = bot.edit_message_text(chat_id, bot_msg.id, format!("🎙 Transcribed:\n\n_{}_", text_content)).parse_mode(ParseMode::MarkdownV2).await;
                                 }
                             }
                         }
@@ -412,6 +413,7 @@ pub async fn handle_prompt(
             }
         }
     } else if let Some(photos) = msg.photo() {
+        info!("Processing photo message...");
         let bot_msg = bot.send_message(chat_id, "🖼 Processing image...").await?;
         if let Some(photo) = photos.last() {
             let file = match bot.get_file(photo.file.id.clone()).await {
@@ -422,13 +424,21 @@ pub async fn handle_prompt(
                 }
             };
 
-            let mut buffer = Vec::new();
-            if let Err(e) = bot.download_file(&file.path, &mut buffer).await {
+            let temp_path = format!("/tmp/photo_{}.jpg", photo.file.id);
+            let mut temp_file = tokio::fs::File::create(&temp_path).await?;
+            if let Err(e) = bot.download_file(&file.path, &mut temp_file).await {
                 let _ = bot.edit_message_text(chat_id, bot_msg.id, format!("❌ Failed to download image: {}", e)).await;
                 return Ok(());
             }
 
+            let mut buffer = Vec::new();
+            let mut temp_file = tokio::fs::File::open(&temp_path).await?;
+            use tokio::io::AsyncReadExt;
+            temp_file.read_to_end(&mut buffer).await?;
+            let _ = tokio::fs::remove_file(&temp_path).await;
+
             let base64_data = STANDARD.encode(&buffer);
+            info!("Image encoded to base64, size: {}", base64_data.len());
             let data_uri = format!("data:image/jpeg;base64,{}", base64_data);
 
             parts.push(json!({
@@ -440,6 +450,7 @@ pub async fn handle_prompt(
             let _ = bot.delete_message(chat_id, bot_msg.id).await;
         }
     } else if let Some(doc) = msg.document() {
+        info!("Processing document message...");
         let bot_msg = bot.send_message(chat_id, "📄 Processing document...").await?;
         let file = match bot.get_file(doc.file.id.clone()).await {
             Ok(f) => f,
@@ -449,16 +460,24 @@ pub async fn handle_prompt(
             }
         };
 
-        let mut buffer = Vec::new();
-        if let Err(e) = bot.download_file(&file.path, &mut buffer).await {
+        let temp_path = format!("/tmp/doc_{}", doc.file.id);
+        let mut temp_file = tokio::fs::File::create(&temp_path).await?;
+        if let Err(e) = bot.download_file(&file.path, &mut temp_file).await {
             let _ = bot.edit_message_text(chat_id, bot_msg.id, format!("❌ Failed to download document: {}", e)).await;
             return Ok(());
         }
+
+        let mut buffer = Vec::new();
+        let mut temp_file = tokio::fs::File::open(&temp_path).await?;
+        use tokio::io::AsyncReadExt;
+        temp_file.read_to_end(&mut buffer).await?;
+        let _ = tokio::fs::remove_file(&temp_path).await;
 
         let mime = doc.mime_type.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "application/octet-stream".to_string());
         let filename = doc.file_name.clone().unwrap_or_else(|| "file.bin".to_string());
 
         let base64_data = STANDARD.encode(&buffer);
+        info!("Document encoded to base64, size: {}, mime: {}", base64_data.len(), mime);
         let data_uri = format!("data:{};base64,{}", mime, base64_data);
 
         parts.push(json!({
@@ -470,8 +489,14 @@ pub async fn handle_prompt(
         let _ = bot.delete_message(chat_id, bot_msg.id).await;
     }
 
+    // Default text if no caption/text provided for media
+    if text_content.is_empty() && !parts.is_empty() {
+        text_content = "Analyze this.".to_string();
+    }
+
     if !text_content.is_empty() {
-        parts.push(json!({
+        // Text part should ideally be first for many models
+        parts.insert(0, json!({
             "type": "text",
             "text": text_content
         }));
@@ -480,6 +505,8 @@ pub async fn handle_prompt(
     if parts.is_empty() {
         return Ok(());
     }
+
+    info!("Sending prompt with {} parts to OpenCode...", parts.len());
 
     let bot_msg = match bot.send_message(chat_id, "⏳ Thinking...").await {
         Ok(m) => m,

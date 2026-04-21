@@ -18,11 +18,16 @@ pub enum State {
         session_id: Option<String>,
         directory: Option<String>,
     },
+    AwaitingSessionSelection {
+        prev_session_id: Option<String>,
+        prev_directory: Option<String>,
+        prev_model: Option<String>,
+    },
 }
 
 #[derive(BotCommands, Clone)]
 #[command(
-    rename_rule = "lowercase",
+    rename_rule = "snake_case",
     description = "These commands are supported:"
 )]
 pub enum Command {
@@ -38,6 +43,8 @@ pub enum Command {
     Model,
     #[command(description = "Abort the current generation.")]
     Abort,
+    #[command(description = "List all sessions.")]
+    ListSessions,
     #[command(description = "Fetch a file from the host machine and send it.")]
     Fetch(String),
 }

@@ -301,6 +301,108 @@ pub async fn receive_model(
     Ok(())
 }
 
+pub async fn list_sessions_command_text(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
+    list_sessions_command(bot, msg, dialogue, client, server_url).await
+}
+
+pub async fn list_sessions_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
+    let state = dialogue.get().await?.unwrap_or_default();
+    
+    let (prev_session_id, prev_directory, prev_model) = match state {
+        State::ActiveSession { session_id, directory, model } => (Some(session_id), directory, model),
+        State::AwaitingSessionSelection { prev_session_id, prev_directory, prev_model } => (prev_session_id, prev_directory, prev_model),
+        _ => (None, None, None),
+    };
+
+    let mut keyboard_rows = vec![];
+    
+    if let Ok(res) = client.get(format!("{}/session", server_url)).send().await {
+        if let Ok(sessions) = res.json::<Vec<Value>>().await {
+            let mut sorted_sessions = sessions;
+            sorted_sessions.sort_by(|a, b| {
+                let time_a = a["time"]["updated"].as_i64().unwrap_or(0);
+                let time_b = b["time"]["updated"].as_i64().unwrap_or(0);
+                time_b.cmp(&time_a)
+            });
+            
+            for sess in sorted_sessions.iter().take(10) {
+                if let (Some(id), Some(title)) = (sess["id"].as_str(), sess["title"].as_str()) {
+                    let label = if title.trim().is_empty() {
+                        id.to_string()
+                    } else {
+                        format!("{} ({})", title, &id[..8])
+                    };
+                    keyboard_rows.push(vec![KeyboardButton::new(label)]);
+                }
+            }
+        }
+    }
+    
+    keyboard_rows.push(vec![KeyboardButton::new("🔙 Cancel / Go Back")]);
+
+    let keyboard = KeyboardMarkup::new(keyboard_rows)
+        .resize_keyboard()
+        .one_time_keyboard();
+
+    bot.send_message(msg.chat.id, "Please select a recent session to resume:")
+        .reply_markup(keyboard)
+        .await?;
+        
+    dialogue.update(State::AwaitingSessionSelection { prev_session_id, prev_directory, prev_model }).await?;
+    
+    Ok(())
+}
+
+pub async fn receive_session_selection(
+    bot: Bot, 
+    msg: Message, 
+    dialogue: MyDialogue, 
+    (prev_session_id, prev_directory, prev_model): (Option<String>, Option<String>, Option<String>),
+) -> HandlerResult {
+    let selection = msg.text().unwrap_or("").to_string();
+    
+    if selection.contains("Cancel / Go Back") {
+        let bot_msg = bot.send_message(msg.chat.id, "Going back...")
+            .reply_markup(main_menu_keyboard())
+            .await?;
+        let _ = bot.delete_message(msg.chat.id, bot_msg.id).await;
+            
+        if let Some(sid) = prev_session_id {
+            dialogue.update(State::ActiveSession { session_id: sid, directory: prev_directory, model: prev_model }).await?;
+        } else {
+            dialogue.update(State::Start).await?;
+        }
+        return Ok(());
+    }
+    
+    // Extract ID from label "Title (id_prefix)" or just "id"
+    let session_id = if selection.contains('(') && selection.contains(')') {
+        if let Some(start) = selection.rfind('(') {
+            if let Some(end) = selection.rfind(')') {
+                selection[start+1..end].to_string()
+            } else {
+                selection
+            }
+        } else {
+            selection
+        }
+    } else {
+        selection
+    };
+
+    bot.send_message(msg.chat.id, format!("🔄 Resuming session: `{}`", session_id))
+        .reply_markup(main_menu_keyboard())
+        .await?;
+        
+    dialogue.update(State::ActiveSession { 
+        session_id, 
+        directory: prev_directory, 
+        model: prev_model 
+    }).await?;
+    
+    Ok(())
+}
+
 pub async fn handle_no_session(bot: Bot, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Please /start the bot or create a /session first.").await?;
     Ok(())

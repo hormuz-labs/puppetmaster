@@ -160,6 +160,7 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(case![Command::Project].endpoint(project_command))
         .branch(case![Command::Model].endpoint(model_command))
         .branch(case![Command::Abort].endpoint(abort_command))
+        .branch(case![Command::ListSessions].endpoint(list_sessions_command))
         .branch(case![Command::Fetch(path)].endpoint(fetch_command))
         ;
 
@@ -169,9 +170,11 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         // Interpret menu button clicks as commands
         .branch(case![State::AwaitingProjectDir { prev_session_id, prev_directory, model }].endpoint(receive_project_dir))
         .branch(case![State::AwaitingModel { session_id, directory }].endpoint(receive_model))
+        .branch(case![State::AwaitingSessionSelection { prev_session_id, prev_directory, prev_model }].endpoint(receive_session_selection))
         .branch(dptree::filter(|msg: Message| msg.text() == Some("🔄 New Session")).endpoint(session_command_text))
         .branch(dptree::filter(|msg: Message| msg.text() == Some("📁 Set Project")).endpoint(project_command_text))
         .branch(dptree::filter(|msg: Message| msg.text() == Some("🤖 Change Model")).endpoint(model_command_text))
+        .branch(dptree::filter(|msg: Message| msg.text() == Some("📜 List Sessions")).endpoint(list_sessions_command_text))
         .branch(dptree::filter(|msg: Message| msg.text() == Some("❓ Help")).endpoint(help_command))
         .branch(dptree::filter(|msg: Message| msg.text().unwrap_or("").starts_with("!")).endpoint(bash_command))
         .branch(case![State::ActiveSession { session_id, directory, model }].endpoint(handle_prompt))

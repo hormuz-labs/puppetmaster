@@ -3,9 +3,11 @@ mod helpers;
 mod handlers;
 mod markdown;
 mod config;
+mod onboarding;
 
 use std::env;
 use std::sync::Arc;
+use clap::{Parser, Subcommand};
 
 use reqwest::Client;
 use teloxide::{
@@ -19,8 +21,28 @@ use crate::state::{State, Command};
 use crate::handlers::*;
 use crate::config::AppConfig;
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Setup the bot configuration
+    Onboard,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+
+    if let Some(Commands::Onboard) = cli.command {
+        onboarding::run_onboarding().await?;
+        return Ok(());
+    }
+
     // Initialize tracing
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
@@ -29,9 +51,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("setting default subscriber failed");
 
     // Load environment variables
+    // 1. Try ~/.puppetmaster/.env
+    if let Some(config_path) = onboarding::get_config_path() {
+        if config_path.exists() {
+            dotenvy::from_path(&config_path).ok();
+        }
+    }
+    // 2. Fallback/override with local .env
     dotenvy::dotenv().ok();
 
-    let bot_token = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN must be set");
+    let bot_token = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN must be set. Run with 'onboard' command to setup.");
     let server_url = env::var("OPENCODE_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:4096".to_string());
     
     // Load config

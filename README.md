@@ -94,30 +94,43 @@ cargo build --release
 
 ## Configuration
 
-The bot relies on environment variables for configuration. Create a `.env` file in the root directory:
+The bot uses environment variables for configuration. The easiest way to set this up is using the built-in onboarding tool:
+
+```bash
+cargo run -- onboard
+```
+
+This will guide you through the setup and save your configuration to `~/.puppetmaster/.env`. The bot will automatically check this location on startup.
+
+Alternatively, you can create a `.env` file in the root directory:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit the `.env` file to match your environment constraints:
+### Configuration Variables
 
 | Variable | Requirement | Description |
 | :--- | :--- | :--- |
 | `TELOXIDE_TOKEN` | **Required** | The API token provided by @BotFather. |
 | `OPENCODE_SERVER_URL` | Optional | The REST endpoint of the OpenCode daemon (Defaults to `http://127.0.0.1:4096`). |
-| `GOOGLE_API_KEY` | Optional | Needed for Voice-to-Text translation. |
-| `GOOGLE_SPEECH_API_KEY` | Optional | Use a dedicated key strictly for Speech-to-Text, overriding the global `GOOGLE_API_KEY` if provided. |
+| `ALLOWED_USERS` | Optional | Comma-separated list of Telegram IDs allowed to use the bot (Defaults to `*` for all). |
+| `ALLOW_IN_GROUPS` | Optional | Whether the bot is allowed to respond in group chats (Defaults to `true`). |
+| `GOOGLE_SPEECH_API_KEY` | Optional | Needed for Voice-to-Text translation. |
 
 ---
 
 ## Usage
 
-Start the bot executable:
+1. **Onboarding (First time only):**
+   ```bash
+   cargo run -- onboard
+   ```
 
-```bash
-cargo run --release
-```
+2. **Start the bot:**
+   ```bash
+   cargo run --release
+   ```
 
 Once the process is running and successfully authenticates with the Telegram API, open your bot in the Telegram application and send `/start`.
 

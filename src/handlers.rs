@@ -15,8 +15,6 @@ use teloxide::{
 use tracing::{error, info};
 use std::env;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
 use teloxide::net::Download;
 
 use crate::state::{State, Command};

@@ -2466,6 +2466,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs",
  "dotenvy",
  "mime_guess",
  "reqwest 0.13.2",

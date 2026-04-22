@@ -77,9 +77,20 @@ pub async fn run_onboarding() -> Result<(), Box<dyn std::error::Error>> {
         .with_default(existing_config.get("OPENCODE_DEFAULT_DIR").map(|s| s.as_str()).unwrap_or(""))
         .prompt()?;
 
-    let allowed_users = Text::new("Enter allowed Telegram User IDs (comma-separated, or '*' for all):")
-        .with_default(existing_config.get("ALLOWED_USERS").map(|s| s.as_str()).unwrap_or("*"))
+    let allowed_users = Text::new("Enter allowed Telegram User IDs (comma-separated):")
+        .with_default(existing_config.get("ALLOWED_USERS").map(|s| s.as_str()).unwrap_or(""))
+        .with_help_message("Required: This secures your bot AND enables the agent to notify you. Get your ID from @userinfobot")
         .prompt()?;
+
+    if allowed_users.is_empty() || allowed_users == "*" {
+        println!("⚠️  Warning: Using '*' allows anyone to use your bot and disables agent notifications.");
+        let confirm_wildcard = Confirm::new("Are you sure you want to allow everyone?")
+            .with_default(false)
+            .prompt()?;
+        if !confirm_wildcard {
+            return Box::pin(run_onboarding()).await; // Restart onboarding
+        }
+    }
 
     let unauthorized_msg = Text::new("Enter unauthorized message (Optional):")
         .with_default(existing_config.get("UNAUTHORIZED_MESSAGE").map(|s| s.as_str()).unwrap_or(""))

@@ -25,12 +25,22 @@ fn get_endpoint_and_param(mime: &mime_guess::Mime) -> (&'static str, &'static st
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. Try to load environment variables from .env
-    dotenvy::dotenv().ok();
+    // 1. Try to load environment variables
+    // Priority 1: ~/.puppetmaster/.env (Global config from onboarding)
+    if let Some(home) = dirs::home_dir() {
+        let global_config = home.join(".puppetmaster").join(".env");
+        if global_config.exists() {
+            // Use dotenv_override so the file overrides any currently set vars (like in our shell session)
+            let _ = dotenvy::from_path_override(&global_config);
+        }
+    }
+
+    // Priority 2: Local .env (Project specific overrides)
+    let _ = dotenvy::dotenv_override();
     
-    // Fallback: Check parent directories for .env (useful if running from deep in project)
+    // Priority 3: Fallback check parent directories
     if env::var("TELOXIDE_TOKEN").is_err() {
-        let _ = dotenvy::from_path("../../.env").ok();
+        let _ = dotenvy::from_path_override("../../.env");
     }
 
     let args = Cli::parse();

@@ -56,11 +56,21 @@ curl -L "${DOWNLOAD_URL}" | tar xz -C "${TMP_DIR}"
 echo "📦 Installing to ${INSTALL_DIR} (may require sudo)..."
 if [ -w "${INSTALL_DIR}" ]; then
     mv "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/"
+    mv "${TMP_DIR}/tg-notify" "${INSTALL_DIR}/"
 else
     sudo mv "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/"
+    sudo mv "${TMP_DIR}/tg-notify" "${INSTALL_DIR}/"
 fi
+
+# Install Skill
+SKILLS_DIR="${HOME}/.agents/skills"
+echo "🔧 Installing Agent Skill to ${SKILLS_DIR}..."
+mkdir -p "${SKILLS_DIR}"
+cp -r "${TMP_DIR}/skills/telegram-notify" "${SKILLS_DIR}/"
 
 # Cleanup
 rm -rf "${TMP_DIR}"
 
-echo "✅ Installed successfully! Run '${BINARY_NAME}' to start."
+echo "✅ Installed successfully!"
+echo "🚀 Run '${BINARY_NAME}' to start the bot."
+echo "🤖 The 'telegram-notify' skill is now available for your AI agents."

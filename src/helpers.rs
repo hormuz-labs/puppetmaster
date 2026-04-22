@@ -11,6 +11,9 @@ pub fn main_menu_keyboard() -> KeyboardMarkup {
         ],
         vec![
             KeyboardButton::new("🤖 Change Model"),
+            KeyboardButton::new("📜 List Sessions"),
+        ],
+        vec![
             KeyboardButton::new("❓ Help"),
         ],
     ])

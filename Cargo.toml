@@ -1,3 +1,9 @@
+[workspace]
+members = [
+    ".",
+    "tools/tg-notify",
+]
+
 [package]
 name = "puppetmaster"
 version = "0.1.0"

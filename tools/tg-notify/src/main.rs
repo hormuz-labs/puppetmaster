@@ -12,6 +12,42 @@ struct Cli {
 
     /// Optional path to a file (image, video, etc.) to send
     file: Option<PathBuf>,
+
+    /// Optional Telegram Chat ID to send to (overrides environment variables)
+    #[arg(short, long)]
+    chat_id: Option<String>,
+
+    /// Optional Session ID to embed for automatic switching
+    #[arg(short, long)]
+    session_id: Option<String>,
+}
+
+fn embed_session_id(message: &str, session_id: &str) -> String {
+    // We use a zero-width non-joiner (U+200C) and a zero-width space (U+200B) 
+    // to create a hidden link that contains the session ID.
+    // This is invisible to the user but can be extracted from the message text.
+    format!("{}\n[‌](https://puppetmaster.local/session/{})", message, session_id)
+}
+
+async fn guess_session_id() -> Option<String> {
+    let server_url = env::var("OPENCODE_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:4096".to_string());
+    let workspace_path = env::var("GEMINI_CLI_IDE_WORKSPACE_PATH").ok()?;
+    
+    let client = reqwest::Client::new();
+    let res = client.get(format!("{}/session", server_url)).send().await.ok()?;
+    let sessions: Vec<serde_json::Value> = res.json().await.ok()?;
+    
+    let mut matching: Vec<_> = sessions.into_iter()
+        .filter(|s| s["directory"].as_str() == Some(&workspace_path))
+        .collect();
+        
+    matching.sort_by(|a, b| {
+        let ta = a["time"]["updated"].as_i64().unwrap_or(0);
+        let tb = b["time"]["updated"].as_i64().unwrap_or(0);
+        tb.cmp(&ta)
+    });
+    
+    matching.first().and_then(|s| s["id"].as_str().map(|id| id.to_string()))
 }
 
 fn get_endpoint_and_param(mime: &mime_guess::Mime) -> (&'static str, &'static str) {
@@ -50,7 +86,7 @@ async fn main() -> Result<()> {
         .or_else(|_| env::var("TELOXIDE_TOKEN"))
         .context("Missing TELEGRAM_BOT_TOKEN or TELOXIDE_TOKEN")?;
 
-    let mut chat_id = env::var("TELEGRAM_CHAT_ID").ok();
+    let mut chat_id = args.chat_id.or_else(|| env::var("TELEGRAM_CHAT_ID").ok());
     
     // Smart fallback for puppetmaster project
     if chat_id.is_none() {
@@ -61,7 +97,20 @@ async fn main() -> Result<()> {
         }
     }
     
-    let chat_id = chat_id.context("Missing TELEGRAM_CHAT_ID or ALLOWED_USERS")?;
+    let chat_id = chat_id.context("Missing TELEGRAM_CHAT_ID or ALLOWED_USERS. Use --chat-id to specify one.")?;
+
+    // Resolve Session ID
+    let session_id = if let Some(sid) = args.session_id {
+        Some(sid)
+    } else {
+        guess_session_id().await
+    };
+
+    let final_message = if let Some(sid) = session_id {
+        embed_session_id(&args.message, &sid)
+    } else {
+        args.message.clone()
+    };
 
     // 3. Send to Telegram
     let client = reqwest::Client::new();
@@ -86,7 +135,7 @@ async fn main() -> Result<()> {
 
         let form = multipart::Form::new()
             .text("chat_id", chat_id)
-            .text("caption", args.message)
+            .text("caption", final_message)
             .part(param, file_part);
 
         let url = format!("https://api.telegram.org/bot{}/{}", token, endpoint);
@@ -101,7 +150,7 @@ async fn main() -> Result<()> {
         let res = client.post(url)
             .json(&serde_json::json!({
                 "chat_id": chat_id,
-                "text": args.message,
+                "text": final_message,
                 "parse_mode": "Markdown"
             }))
             .send()

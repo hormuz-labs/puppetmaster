@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use teloxide::{
     dispatching::dialogue::InMemStorage,
     prelude::*,
-    types::{KeyboardButton, KeyboardRemove, KeyboardMarkup, ParseMode, ChatAction},
+    types::{KeyboardButton, KeyboardRemove, KeyboardMarkup, ParseMode, ChatAction, MessageEntityKind},
     utils::command::BotCommands,
 };
 use tracing::{error, info};
@@ -326,8 +326,19 @@ pub async fn list_sessions_command(bot: Bot, msg: Message, dialogue: MyDialogue,
             });
             
             for sess in sorted_sessions.iter().take(10) {
-                if let (Some(id), Some(title)) = (sess["id"].as_str(), sess["title"].as_str()) {
-                    let label = if title.trim().is_empty() {
+                if let Some(id) = sess["id"].as_str() {
+                    let title = sess["title"].as_str().unwrap_or("No Title");
+                    let directory = sess["directory"].as_str();
+                    
+                    let label = if let Some(dir) = directory {
+                        let dir_path = std::path::Path::new(dir);
+                        let dir_name = dir_path.file_name().and_then(|n| n.to_str()).unwrap_or(dir);
+                        if title == "Telegram Bot Session" || title.is_empty() {
+                            format!("📁 {} ({})", dir_name, &id[..8])
+                        } else {
+                            format!("{} - {} ({})", title, dir_name, &id[..8])
+                        }
+                    } else if title.is_empty() || title == "Telegram Bot Session" {
                         id.to_string()
                     } else {
                         format!("{} ({})", title, &id[..8])
@@ -408,13 +419,47 @@ pub async fn handle_no_session(bot: Bot, msg: Message) -> HandlerResult {
     Ok(())
 }
 
+fn extract_session_id(msg: &Message) -> Option<String> {
+    let reply = msg.reply_to_message()?;
+    let entities = reply.entities()?;
+    
+    for entity in entities {
+        if let MessageEntityKind::TextLink { url } = &entity.kind {
+            let url_str = url.as_str();
+            if let Some(pos) = url_str.find("https://puppetmaster.local/session/") {
+                let start = pos + "https://puppetmaster.local/session/".len();
+                return Some(url_str[start..].to_string());
+            }
+        }
+    }
+    None
+}
+
 pub async fn handle_prompt(
     bot: Bot, 
     msg: Message, 
-    (session_id, _directory, model): (String, Option<String>, Option<String>), 
+    dialogue: MyDialogue,
+    (session_id, directory, model): (String, Option<String>, Option<String>), 
     client: Client, 
     server_url: Arc<String>
 ) -> HandlerResult {
+    let mut current_session_id = session_id;
+    
+    if let Some(new_sid) = extract_session_id(&msg) {
+        if new_sid != current_session_id {
+            info!("Detected session switch in reply: {} -> {}", current_session_id, new_sid);
+            bot.send_message(msg.chat.id, format!("🔄 Switching context to session `{}`...", &new_sid[..8])).await?;
+            current_session_id = new_sid.clone();
+            
+            // Update dialogue state to persist the switch
+            let _ = dialogue.update(State::ActiveSession {
+                session_id: new_sid,
+                directory: directory.clone(),
+                model: model.clone(),
+            }).await;
+        }
+    }
+
     let chat_id = msg.chat.id;
     let mut parts = Vec::new();
     let mut text_content = String::new();
@@ -616,8 +661,8 @@ pub async fn handle_prompt(
         }
     };
 
-    let mut sse_req = client.get(format!("{}/event?sessionID={}", server_url, session_id));
-    if let Some(ref dir) = _directory {
+    let mut sse_req = client.get(format!("{}/event?sessionID={}", server_url, current_session_id));
+    if let Some(ref dir) = directory {
         sse_req = sse_req.header("x-opencode-directory", dir);
     }
     let sse_req = sse_req.try_clone().unwrap();
@@ -643,8 +688,8 @@ pub async fn handle_prompt(
         }
     }
 
-    let mut req = client.post(format!("{}/session/{}/prompt_async", server_url, session_id));
-    if let Some(ref dir) = _directory {
+    let mut req = client.post(format!("{}/session/{}/prompt_async", server_url, current_session_id));
+    if let Some(ref dir) = directory {
         req = req.header("x-opencode-directory", dir);
     }
     let prompt_res = req

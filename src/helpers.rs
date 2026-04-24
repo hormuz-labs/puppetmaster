@@ -63,12 +63,21 @@ pub fn render_html_chunks(thinking: &str, answer: &str, thinking_header: &str) -
 
 pub async fn create_session(client: &Client, server_url: &str, directory: Option<&str>) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let mut req = client.post(format!("{}/session", server_url));
+    let mut title = "Telegram Bot Session".to_string();
+
     if let Some(dir) = directory {
         req = req.query(&[("directory", dir)]);
         req = req.header("x-opencode-directory", dir);
+        
+        let dir_path = std::path::Path::new(dir);
+        if let Some(name) = dir_path.file_name().and_then(|n| n.to_str()) {
+            title = format!("Session: {}", name);
+        } else {
+            title = format!("Session in {}", dir);
+        }
     }
     
-    let res = req.json(&json!({"title": "Telegram Bot Session"})).send().await?;
+    let res = req.json(&json!({"title": title})).send().await?;
         
     if !res.status().is_success() {
         return Err(res.text().await?.into());

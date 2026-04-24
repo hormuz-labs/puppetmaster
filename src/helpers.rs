@@ -1,24 +1,6 @@
 use reqwest::Client;
 use serde_json::{json, Value};
-use teloxide::types::{KeyboardButton, KeyboardMarkup};
 use crate::markdown::markdown_to_telegram_html_chunks;
-
-pub fn main_menu_keyboard() -> KeyboardMarkup {
-    KeyboardMarkup::new(vec![
-        vec![
-            KeyboardButton::new("🔄 New Session"),
-            KeyboardButton::new("📁 Set Project"),
-        ],
-        vec![
-            KeyboardButton::new("🤖 Change Model"),
-            KeyboardButton::new("📜 List Sessions"),
-        ],
-        vec![
-            KeyboardButton::new("❓ Help"),
-        ],
-    ])
-    .resize_keyboard()
-}
 
 pub fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")

@@ -39,12 +39,12 @@ pub enum Command {
     Session,
     #[command(description = "Set the active project directory.")]
     Project,
-    #[command(description = "Set the AI model (e.g., google/gemini-3-pro-preview).")]
+    #[command(description = "Set the AI model.")]
     Model,
     #[command(description = "Abort the current generation.")]
     Abort,
     #[command(description = "List all sessions.")]
     ListSessions,
-    #[command(description = "Fetch a file from the host machine and send it.")]
+    #[command(description = "Fetch a file from the host machine.", hide)]
     Fetch(String),
 }

@@ -76,10 +76,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Set up the Telegram bot menu
     use teloxide::utils::command::BotCommands;
+    use teloxide::types::BotCommandScope;
     let commands = Command::bot_commands();
-    if let Err(e) = bot.set_my_commands(commands).await {
-        error!("Failed to set bot commands: {}", e);
+    
+    // Set commands for different scopes to ensure they show up everywhere
+    if let Err(e) = bot.set_my_commands(commands.clone()).scope(BotCommandScope::AllPrivateChats).await {
+        error!("Failed to set commands for private chats: {}", e);
     }
+    if let Err(e) = bot.set_my_commands(commands.clone()).scope(BotCommandScope::AllGroupChats).await {
+        error!("Failed to set commands for group chats: {}", e);
+    }
+    if let Err(e) = bot.set_my_commands(commands).await {
+        error!("Failed to set default commands: {}", e);
+    }
+    
+    info!("Bot commands initialization attempted.");
     
     let http_client = Client::new();
     let server_url = Arc::new(server_url);

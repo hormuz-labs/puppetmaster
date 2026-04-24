@@ -68,3 +68,20 @@ pub async fn create_session(client: &Client, server_url: &str, directory: Option
     let data: Value = res.json().await?;
     Ok(data["id"].as_str().unwrap_or("").to_string())
 }
+
+pub fn main_menu_keyboard() -> teloxide::types::KeyboardMarkup {
+    teloxide::types::KeyboardMarkup::new(vec![
+        vec![
+            teloxide::types::KeyboardButton::new("🔄 New Session"),
+            teloxide::types::KeyboardButton::new("📁 Set Project"),
+        ],
+        vec![
+            teloxide::types::KeyboardButton::new("🤖 Change Model"),
+            teloxide::types::KeyboardButton::new("📜 List Sessions"),
+        ],
+        vec![
+            teloxide::types::KeyboardButton::new("❓ Help"),
+        ],
+    ])
+    .resize_keyboard()
+}

@@ -18,14 +18,14 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use teloxide::net::Download;
 
 use crate::state::{State, Command};
-use crate::helpers::{render_html_chunks, create_session};
+use crate::helpers::{main_menu_keyboard, render_html_chunks, create_session};
 
 pub type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 pub async fn help_command(bot: Bot, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, Command::descriptions().to_string())
-        .reply_markup(KeyboardRemove::new())
+        .reply_markup(main_menu_keyboard())
         .await?;
     Ok(())
 }
@@ -33,7 +33,7 @@ pub async fn help_command(bot: Bot, msg: Message) -> HandlerResult {
 pub async fn start_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
     let chat_id = msg.chat.id;
     bot.send_message(chat_id, "Welcome to OpenCode! Creating your first session...")
-        .reply_markup(KeyboardRemove::new())
+        .reply_markup(main_menu_keyboard())
         .await?;
     
     match create_session(&client, &server_url, None).await {
@@ -155,7 +155,7 @@ pub async fn receive_project_dir(
     
     if dir.contains("Cancel / Go Back") {
         let bot_msg = bot.send_message(msg.chat.id, "Going back...")
-            .reply_markup(KeyboardRemove::new())
+            .reply_markup(main_menu_keyboard())
             .await?;
         let _ = bot.delete_message(msg.chat.id, bot_msg.id).await;
         
@@ -169,13 +169,13 @@ pub async fn receive_project_dir(
     
     if dir.contains("Type manually") {
         bot.send_message(msg.chat.id, "Okay, please type the absolute path manually.")
-            .reply_markup(KeyboardRemove::new())
+            .reply_markup(main_menu_keyboard())
             .await?;
         return Ok(());
     }
     
     bot.send_message(msg.chat.id, format!("Setting project directory to `{}` and creating a new session...", dir))
-        .reply_markup(KeyboardRemove::new())
+        .reply_markup(main_menu_keyboard())
         .await?;
         
     match create_session(&client, &server_url, Some(&dir)).await {
@@ -270,7 +270,7 @@ pub async fn receive_model(
     
     if model.contains("Cancel / Go Back") {
         let bot_msg = bot.send_message(msg.chat.id, "Going back...")
-            .reply_markup(KeyboardRemove::new())
+            .reply_markup(main_menu_keyboard())
             .await?;
         let _ = bot.delete_message(msg.chat.id, bot_msg.id).await;
             
@@ -284,7 +284,7 @@ pub async fn receive_model(
     
     if let Some(sid) = session_id {
         bot.send_message(msg.chat.id, format!("✅ Active model set to: `{}`", model))
-            .reply_markup(KeyboardRemove::new())
+            .reply_markup(main_menu_keyboard())
             .await?;
             
         dialogue.update(State::ActiveSession { 
@@ -294,7 +294,7 @@ pub async fn receive_model(
         }).await?;
     } else {
         bot.send_message(msg.chat.id, "✅ Model set. Please use /start or /session to create a session first.")
-            .reply_markup(KeyboardRemove::new())
+            .reply_markup(main_menu_keyboard())
             .await?;
             
         dialogue.update(State::Start).await?; 
@@ -376,7 +376,7 @@ pub async fn receive_session_selection(
     
     if selection.contains("Cancel / Go Back") {
         let bot_msg = bot.send_message(msg.chat.id, "Going back...")
-            .reply_markup(KeyboardRemove::new())
+            .reply_markup(main_menu_keyboard())
             .await?;
         let _ = bot.delete_message(msg.chat.id, bot_msg.id).await;
             
@@ -404,7 +404,7 @@ pub async fn receive_session_selection(
     };
 
     bot.send_message(msg.chat.id, format!("🔄 Resuming session: `{}`", session_id))
-        .reply_markup(KeyboardRemove::new())
+        .reply_markup(main_menu_keyboard())
         .await?;
         
     dialogue.update(State::ActiveSession { 

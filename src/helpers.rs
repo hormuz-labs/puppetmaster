@@ -1,24 +1,6 @@
 use reqwest::Client;
 use serde_json::{json, Value};
-use teloxide::types::{KeyboardButton, KeyboardMarkup};
 use crate::markdown::markdown_to_telegram_html_chunks;
-
-pub fn main_menu_keyboard() -> KeyboardMarkup {
-    KeyboardMarkup::new(vec![
-        vec![
-            KeyboardButton::new("🔄 New Session"),
-            KeyboardButton::new("📁 Set Project"),
-        ],
-        vec![
-            KeyboardButton::new("🤖 Change Model"),
-            KeyboardButton::new("📜 List Sessions"),
-        ],
-        vec![
-            KeyboardButton::new("❓ Help"),
-        ],
-    ])
-    .resize_keyboard()
-}
 
 pub fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")
@@ -85,4 +67,21 @@ pub async fn create_session(client: &Client, server_url: &str, directory: Option
     
     let data: Value = res.json().await?;
     Ok(data["id"].as_str().unwrap_or("").to_string())
+}
+
+pub fn main_menu_keyboard() -> teloxide::types::KeyboardMarkup {
+    teloxide::types::KeyboardMarkup::new(vec![
+        vec![
+            teloxide::types::KeyboardButton::new("🔄 New Session"),
+            teloxide::types::KeyboardButton::new("📁 Set Project"),
+        ],
+        vec![
+            teloxide::types::KeyboardButton::new("🤖 Change Model"),
+            teloxide::types::KeyboardButton::new("📜 List Sessions"),
+        ],
+        vec![
+            teloxide::types::KeyboardButton::new("❓ Help"),
+        ],
+    ])
+    .resize_keyboard()
 }

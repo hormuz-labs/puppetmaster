@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use teloxide::{
     dispatching::dialogue::InMemStorage,
     prelude::*,
-    types::{KeyboardButton, KeyboardRemove, KeyboardMarkup, ParseMode, ChatAction, MessageEntityKind},
+    types::{KeyboardButton, KeyboardMarkup, ParseMode, ChatAction, MessageEntityKind},
     utils::command::BotCommands,
 };
 use tracing::{error, info};
@@ -23,8 +23,12 @@ use crate::helpers::{main_menu_keyboard, render_html_chunks, create_session};
 pub type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
+pub type AbortSignals = Arc<tokio::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Notify>>>>;
+
 pub async fn help_command(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?;
+    bot.send_message(msg.chat.id, Command::descriptions().to_string())
+        .reply_markup(main_menu_keyboard())
+        .await?;
     Ok(())
 }
 
@@ -61,6 +65,12 @@ pub async fn project_command_text(bot: Bot, msg: Message, dialogue: MyDialogue, 
 
 pub async fn model_command_text(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
     model_command(bot, msg, dialogue, client, server_url).await
+}
+
+pub async fn unknown_command(bot: Bot, msg: Message) -> HandlerResult {
+    bot.send_message(msg.chat.id, "❓ Unknown command. Use /help to see available commands.")
+        .await?;
+    Ok(())
 }
 
 pub async fn session_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
@@ -167,7 +177,7 @@ pub async fn receive_project_dir(
     
     if dir.contains("Type manually") {
         bot.send_message(msg.chat.id, "Okay, please type the absolute path manually.")
-            .reply_markup(KeyboardRemove::new())
+            .reply_markup(main_menu_keyboard())
             .await?;
         return Ok(());
     }
@@ -330,18 +340,19 @@ pub async fn list_sessions_command(bot: Bot, msg: Message, dialogue: MyDialogue,
                     let title = sess["title"].as_str().unwrap_or("No Title");
                     let directory = sess["directory"].as_str();
                     
+                    let id_prefix: String = id.chars().take(8).collect();
                     let label = if let Some(dir) = directory {
                         let dir_path = std::path::Path::new(dir);
                         let dir_name = dir_path.file_name().and_then(|n| n.to_str()).unwrap_or(dir);
                         if title == "Telegram Bot Session" || title.is_empty() {
-                            format!("📁 {} ({})", dir_name, &id[..8])
+                            format!("📁 {} ({})", dir_name, id_prefix)
                         } else {
-                            format!("{} - {} ({})", title, dir_name, &id[..8])
+                            format!("{} - {} ({})", title, dir_name, id_prefix)
                         }
                     } else if title.is_empty() || title == "Telegram Bot Session" {
                         id.to_string()
                     } else {
-                        format!("{} ({})", title, &id[..8])
+                        format!("{} ({})", title, id_prefix)
                     };
                     keyboard_rows.push(vec![KeyboardButton::new(label)]);
                 }
@@ -369,15 +380,17 @@ pub async fn receive_session_selection(
     msg: Message, 
     dialogue: MyDialogue, 
     (prev_session_id, prev_directory, prev_model): (Option<String>, Option<String>, Option<String>),
+    client: Client,
+    server_url: Arc<String>,
 ) -> HandlerResult {
     let selection = msg.text().unwrap_or("").to_string();
-    
+
     if selection.contains("Cancel / Go Back") {
         let bot_msg = bot.send_message(msg.chat.id, "Going back...")
             .reply_markup(main_menu_keyboard())
             .await?;
         let _ = bot.delete_message(msg.chat.id, bot_msg.id).await;
-            
+
         if let Some(sid) = prev_session_id {
             dialogue.update(State::ActiveSession { session_id: sid, directory: prev_directory, model: prev_model }).await?;
         } else {
@@ -385,9 +398,9 @@ pub async fn receive_session_selection(
         }
         return Ok(());
     }
-    
-    // Extract ID from label "Title (id_prefix)" or just "id"
-    let session_id = if selection.contains('(') && selection.contains(')') {
+
+    // Extract ID prefix from label "Title (id_prefix)" or just "id"
+    let id_prefix = if selection.contains('(') && selection.contains(')') {
         if let Some(start) = selection.rfind('(') {
             if let Some(end) = selection.rfind(')') {
                 selection[start+1..end].to_string()
@@ -398,22 +411,41 @@ pub async fn receive_session_selection(
             selection
         }
     } else {
-        selection
+        selection.clone()
     };
 
-    bot.send_message(msg.chat.id, format!("🔄 Resuming session: `{}`", session_id))
+    // Look up the full session ID from the API
+    let mut full_session_id = id_prefix.clone();
+    let mut new_directory = prev_directory.clone();
+
+    if let Ok(res) = client.get(format!("{}/session", server_url)).send().await {
+        if let Ok(sessions) = res.json::<Vec<Value>>().await {
+            for sess in sessions {
+                if let Some(id) = sess["id"].as_str() {
+                    if id.starts_with(&id_prefix) || id == id_prefix {
+                        full_session_id = id.to_string();
+                        if let Some(dir) = sess["directory"].as_str() {
+                            new_directory = Some(dir.to_string());
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    bot.send_message(msg.chat.id, format!("🔄 Resuming session: `{}`", full_session_id))
         .reply_markup(main_menu_keyboard())
         .await?;
-        
-    dialogue.update(State::ActiveSession { 
-        session_id, 
-        directory: prev_directory, 
-        model: prev_model 
+
+    dialogue.update(State::ActiveSession {
+        session_id: full_session_id,
+        directory: new_directory,
+        model: prev_model
     }).await?;
-    
+
     Ok(())
 }
-
 pub async fn handle_no_session(bot: Bot, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Please /start the bot or create a /session first.").await?;
     Ok(())
@@ -436,21 +468,22 @@ fn extract_session_id(msg: &Message) -> Option<String> {
 }
 
 pub async fn handle_prompt(
-    bot: Bot, 
-    msg: Message, 
+    bot: Bot,
+    msg: Message,
     dialogue: MyDialogue,
-    (session_id, directory, model): (String, Option<String>, Option<String>), 
-    client: Client, 
-    server_url: Arc<String>
+    (session_id, directory, model): (String, Option<String>, Option<String>),
+    client: Client,
+    server_url: Arc<String>,
+    abort_signals: AbortSignals
 ) -> HandlerResult {
     let mut current_session_id = session_id;
-    
+
     if let Some(new_sid) = extract_session_id(&msg) {
         if new_sid != current_session_id {
             info!("Detected session switch in reply: {} -> {}", current_session_id, new_sid);
             bot.send_message(msg.chat.id, format!("🔄 Switching context to session `{}`...", &new_sid[..8])).await?;
             current_session_id = new_sid.clone();
-            
+
             // Update dialogue state to persist the switch
             let _ = dialogue.update(State::ActiveSession {
                 session_id: new_sid,
@@ -461,9 +494,13 @@ pub async fn handle_prompt(
     }
 
     let chat_id = msg.chat.id;
+
+    // Register the abort signal
+    let abort_notify = Arc::new(tokio::sync::Notify::new());
+    abort_signals.lock().await.insert(current_session_id.clone(), abort_notify.clone());
+
     let mut parts = Vec::new();
     let mut text_content = String::new();
-
     if let Some(t) = msg.text() {
         text_content = t.to_string();
     } else if let Some(t) = msg.caption() {
@@ -676,6 +713,18 @@ pub async fn handle_prompt(
         }
     };
 
+    // Wait for the SSE connection to open before sending the prompt to avoid missing events
+    match tokio::time::timeout(std::time::Duration::from_secs(5), es.next()).await {
+        Ok(Some(Ok(reqwest_eventsource::Event::Open))) => {
+            info!("SSE Connection Opened initially.");
+        }
+        _ => {
+            error!("Failed to establish SSE connection or timed out.");
+            let _ = bot.edit_message_text(chat_id, bot_msg.id, "❌ Failed to connect to session event stream.").await;
+            return Ok(());
+        }
+    }
+
     let mut payload = json!({
         "parts": parts
     });    
@@ -717,104 +766,113 @@ pub async fn handle_prompt(
     let mut part_types = HashMap::<String, String>::new();
     let mut sent_messages = vec![bot_msg.id];
     let mut last_edit = Instant::now();
-    let mut last_typing = Instant::now();
     let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
     
+    let mut typing_interval = tokio::time::interval(Duration::from_secs(4));
+    
     loop {
-        if last_typing.elapsed() > Duration::from_secs(4) {
-            let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
-            last_typing = Instant::now();
-        }
-
-        let event_res = match tokio::time::timeout(Duration::from_secs(1), es.next()).await {
-            Ok(Some(ev)) => ev,
-            Ok(None) => break,
-            Err(_) => continue,
-        };
-        if last_typing.elapsed() > Duration::from_secs(4) {
-            let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
-            last_typing = Instant::now();
-        }
-        match event_res {
-            Ok(Event::Open) => {
-                info!("SSE Connection Opened!");
+        tokio::select! {
+            _ = abort_notify.notified() => {
+                info!("Abort signal received for session {}", current_session_id);
+                answer_text.push_str("\n\n🛑 Aborted by user.");
+                break;
             }
-            Ok(Event::Message(message)) => {
-                if let Ok(data) = serde_json::from_str::<Value>(&message.data) {
-                    let event_type = data["type"].as_str().unwrap_or("");
-                    let properties = &data["properties"];
-                    
-                    match event_type {
-                        "message.part.updated" => {
-                            if let (Some(pid), Some(ptype)) = (properties["part"]["id"].as_str(), properties["part"]["type"].as_str()) {
-                                part_types.insert(pid.to_string(), ptype.to_string());
-                            }
-                        }
-                        "message.part.delta" => {
-                            let part_id = properties["partID"].as_str().unwrap_or("");
-                            let delta = properties["delta"].as_str().unwrap_or("");
-                            let field = properties["field"].as_str().unwrap_or("");
+            _ = typing_interval.tick() => {
+                let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
+            }
+            ev_opt = es.next() => {
+                let event_res = match ev_opt {
+                    Some(Ok(ev)) => Ok(ev),
+                    Some(Err(e)) => Err(e),
+                    None => {
+                        info!("Session became idle (stream closed).");
+                        break;
+                    }
+                };
 
-                            if field == "text" || field == "reasoning" {
-                                let part_type = part_types.get(part_id).map(|s| s.as_str()).unwrap_or("text");
-                                if part_type == "reasoning" || field == "reasoning" {
-                                    thinking_text.push_str(delta);
-                                } else {
-                                    answer_text.push_str(delta);
+                match event_res {
+                    Ok(Event::Open) => {
+                        info!("SSE Connection Opened!");
+                    }
+                    Ok(Event::Message(message)) => {
+                        if let Ok(data) = serde_json::from_str::<Value>(&message.data) {
+                            let event_type = data["type"].as_str().unwrap_or("");
+                            let properties = &data["properties"];
+                            
+                            match event_type {
+                                "message.part.updated" => {
+                                    if let (Some(pid), Some(ptype)) = (properties["part"]["id"].as_str(), properties["part"]["type"].as_str()) {
+                                        part_types.insert(pid.to_string(), ptype.to_string());
+                                    }
                                 }
-                                
-                                if last_edit.elapsed() > Duration::from_secs(1) {
-                                    let frame = match (last_edit.elapsed().as_millis() / 500) % 3 {
-                                        0 => "⏳ Thinking.",
-                                        1 => "⏳ Thinking..",
-                                        _ => "⏳ Thinking...",
-                                    };
-                                    let chunks = render_html_chunks(&thinking_text, &answer_text, frame);
+                                "message.part.delta" => {
+                                    let part_id = properties["partID"].as_str().unwrap_or("");
+                                    let delta = properties["delta"].as_str().unwrap_or("");
+                                    let field = properties["field"].as_str().unwrap_or("");
 
-                                    if let Some(last_chunk) = chunks.last() {
-                                        if !last_chunk.trim().is_empty() {
-                                            while sent_messages.len() < chunks.len() {
-                                                if let Ok(new_msg) = bot.send_message(chat_id, "⏳...").await {
-                                                    sent_messages.push(new_msg.id);
-                                                } else {
-                                                    break;
+                                    if field == "text" || field == "reasoning" {
+                                        let part_type = part_types.get(part_id).map(|s| s.as_str()).unwrap_or("text");
+                                        if part_type == "reasoning" || field == "reasoning" {
+                                            thinking_text.push_str(delta);
+                                        } else {
+                                            answer_text.push_str(delta);
+                                        }
+                                        
+                                        if last_edit.elapsed() > Duration::from_secs(1) {
+                                            let frame = match (last_edit.elapsed().as_millis() / 500) % 3 {
+                                                0 => "⏳ Thinking.",
+                                                1 => "⏳ Thinking..",
+                                                _ => "⏳ Thinking...",
+                                            };
+                                            let chunks = render_html_chunks(&thinking_text, &answer_text, frame);
+
+                                            if let Some(last_chunk) = chunks.last() {
+                                                if !last_chunk.trim().is_empty() {
+                                                    while sent_messages.len() < chunks.len() {
+                                                        if let Ok(new_msg) = bot.send_message(chat_id, "⏳...").await {
+                                                            sent_messages.push(new_msg.id);
+                                                        } else {
+                                                            break;
+                                                        }
+                                                    }
+                                                    
+                                                    let last_chunk_index = chunks.len() - 1;
+                                                    let last_msg_id = sent_messages[last_chunk_index];
+                                                    let _ = bot.edit_message_text(chat_id, last_msg_id, last_chunk)
+                                                        .parse_mode(ParseMode::Html)
+                                                        .await;
                                                 }
                                             }
-                                            
-                                            let last_chunk_index = chunks.len() - 1;
-                                            let last_msg_id = sent_messages[last_chunk_index];
-                                            let _ = bot.edit_message_text(chat_id, last_msg_id, last_chunk)
-                                                .parse_mode(ParseMode::Html)
-                                                .await;
+                                            last_edit = Instant::now();
                                         }
                                     }
-                                    last_edit = Instant::now();
                                 }
+                                "session.idle" => {
+                                    info!("Session became idle, stream complete.");
+                                    break;
+                                }
+                                "session.error" => {
+                                    let err_msg = properties.to_string();
+                                    error!("Session error: {}", err_msg);
+                                    answer_text.push_str(&format!("\n\n❌ Session Error: {}", err_msg));
+                                    break;
+                                }
+                                _ => {}
                             }
                         }
-                        "session.idle" => {
-                            info!("Session became idle, stream complete.");
-                            break;
-                        }
-                        "session.error" => {
-                            let err_msg = properties.to_string();
-                            error!("Session error: {}", err_msg);
-                            answer_text.push_str(&format!("\n\n❌ Session Error: {}", err_msg));
-                            break;
-                        }
-                        _ => {}
+                    }
+                    Err(err) => {
+                        error!("SSE Stream Error: {}", err);
+                        answer_text.push_str("\n\n⚠️ Stream interrupted.");
+                        break;
                     }
                 }
-            }
-            Err(err) => {
-                error!("SSE Stream Error: {}", err);
-                answer_text.push_str("\n\n⚠️ Stream interrupted.");
-                break;
             }
         }
     }
     
     es.close();
+    abort_signals.lock().await.remove(&current_session_id);
     
     let chunks = render_html_chunks(&thinking_text, &answer_text, "💭 Thinking completed");
     
@@ -846,19 +904,33 @@ pub async fn handle_prompt(
     Ok(())
 }
 
-pub async fn abort_command(bot: Bot, msg: Message, dialogue: MyDialogue, client: Client, server_url: Arc<String>) -> HandlerResult {
-    let state = dialogue.get().await?.unwrap_or_default();
+pub async fn abort_command(bot: Bot, msg: Message, storage: Arc<InMemStorage<State>>, client: Client, server_url: Arc<String>, abort_signals: AbortSignals) -> HandlerResult {
+    use teloxide::dispatching::dialogue::Storage;
+    let state = storage.get_dialogue(msg.chat.id).await?.unwrap_or_default();
     
     if let State::ActiveSession { session_id, directory, .. } = state {
+        // Trigger local loop abort
+        if let Some(notify) = abort_signals.lock().await.get(&session_id) {
+            notify.notify_waiters();
+        }
+
         let mut req = client.post(format!("{}/session/{}/abort", server_url, session_id));
         if let Some(dir) = directory {
             req = req.header("x-opencode-directory", dir);
         }
         match req.send().await {
-            Ok(_) => {
-                bot.send_message(msg.chat.id, "🛑 Sent abort signal to the active session.").await?;
+            Ok(res) => {
+                let status = res.status();
+                if status.is_success() {
+                    bot.send_message(msg.chat.id, "🛑 Sent abort signal to the active session.").await?;
+                } else {
+                    let err_text = res.text().await.unwrap_or_default();
+                    error!("Abort failed with status {}: {}", status, err_text);
+                    bot.send_message(msg.chat.id, format!("❌ Failed to abort: HTTP {}", status)).await?;
+                }
             }
             Err(e) => {
+                error!("Abort request failed: {}", e);
                 bot.send_message(msg.chat.id, format!("❌ Failed to abort: {}", e)).await?;
             }
         }

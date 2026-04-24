@@ -13,6 +13,7 @@ use reqwest::Client;
 use teloxide::{
     dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler},
     prelude::*,
+    utils::command::BotCommands,
 };
 use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -75,7 +76,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let me = Arc::new(me);
     
     // Set up the Telegram bot menu
-    use teloxide::utils::command::BotCommands;
     use teloxide::types::{BotCommandScope, MenuButton};
     let commands = Command::bot_commands();
     
@@ -99,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let http_client = Client::new();
     let server_url = Arc::new(server_url);
+    let abort_signals: Arc<tokio::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Notify>>>> = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![
@@ -106,7 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             http_client,
             server_url,
             app_config,
-            me
+            me,
+            abort_signals
         ])
         .enable_ctrlc_handler()
         .build()
@@ -169,20 +171,44 @@ async fn access_control_filter(
 fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
     use dptree::case;
 
-    let command_handler = teloxide::filter_command::<Command, _>()
-        .branch(case![Command::Start].endpoint(start_command))
+    let message_handler = Update::filter_message()
+        .filter_async(access_control_filter);
+
+    let async_command_handler = teloxide::filter_command::<Command, _>()
         .branch(case![Command::Help].endpoint(help_command))
+        .branch(case![Command::Abort].endpoint(abort_command));
+
+    let async_handler = message_handler.clone()
+        .branch(async_command_handler)
+        .branch(dptree::filter(|msg: Message| msg.text() == Some("❓ Help")).endpoint(help_command));
+
+    let unknown_command_handler = dptree::filter(|msg: Message, me: Arc<teloxide::types::Me>| {
+        msg.text().map(|t| {
+            if t.starts_with('/') {
+                let first_word = t.split_whitespace().next().unwrap_or("");
+                // If the first word contains another '/', it's likely an absolute path, not a command.
+                if first_word.chars().skip(1).any(|c| c == '/') {
+                    return false;
+                }
+                Command::parse(t, me.user.username.as_deref().unwrap_or("")).is_err()
+            } else {
+                false
+            }
+        }).unwrap_or(false)
+    })
+    .endpoint(unknown_command);
+
+    let dialogue_command_handler = teloxide::filter_command::<Command, _>()
+        .branch(case![Command::Start].endpoint(start_command))
         .branch(case![Command::Session].endpoint(session_command))
         .branch(case![Command::Project].endpoint(project_command))
         .branch(case![Command::Model].endpoint(model_command))
-        .branch(case![Command::Abort].endpoint(abort_command))
         .branch(case![Command::ListSessions].endpoint(list_sessions_command))
         .branch(case![Command::Fetch(path)].endpoint(fetch_command))
         ;
 
-    let message_handler = Update::filter_message()
-        .filter_async(access_control_filter)
-        .branch(command_handler)
+    let main_handler = dialogue::enter::<Update, InMemStorage<State>, State, _>()
+        .branch(dialogue_command_handler)
         // Interpret menu button clicks as commands
         .branch(case![State::AwaitingProjectDir { prev_session_id, prev_directory, model }].endpoint(receive_project_dir))
         .branch(case![State::AwaitingModel { session_id, directory }].endpoint(receive_model))
@@ -191,11 +217,12 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(dptree::filter(|msg: Message| msg.text() == Some("📁 Set Project")).endpoint(project_command_text))
         .branch(dptree::filter(|msg: Message| msg.text() == Some("🤖 Change Model")).endpoint(model_command_text))
         .branch(dptree::filter(|msg: Message| msg.text() == Some("📜 List Sessions")).endpoint(list_sessions_command_text))
-        .branch(dptree::filter(|msg: Message| msg.text() == Some("❓ Help")).endpoint(help_command))
         .branch(dptree::filter(|msg: Message| msg.text().unwrap_or("").starts_with("!")).endpoint(bash_command))
         .branch(case![State::ActiveSession { session_id, directory, model }].endpoint(handle_prompt))
         .branch(dptree::endpoint(handle_no_session));
 
-    dialogue::enter::<Update, InMemStorage<State>, State, _>()
-        .branch(message_handler)
+    message_handler
+        .branch(async_handler)
+        .branch(unknown_command_handler)
+        .branch(main_handler)
 }

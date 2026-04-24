@@ -340,18 +340,19 @@ pub async fn list_sessions_command(bot: Bot, msg: Message, dialogue: MyDialogue,
                     let title = sess["title"].as_str().unwrap_or("No Title");
                     let directory = sess["directory"].as_str();
                     
+                    let id_prefix: String = id.chars().take(8).collect();
                     let label = if let Some(dir) = directory {
                         let dir_path = std::path::Path::new(dir);
                         let dir_name = dir_path.file_name().and_then(|n| n.to_str()).unwrap_or(dir);
                         if title == "Telegram Bot Session" || title.is_empty() {
-                            format!("📁 {} ({})", dir_name, &id[..8])
+                            format!("📁 {} ({})", dir_name, id_prefix)
                         } else {
-                            format!("{} - {} ({})", title, dir_name, &id[..8])
+                            format!("{} - {} ({})", title, dir_name, id_prefix)
                         }
                     } else if title.is_empty() || title == "Telegram Bot Session" {
                         id.to_string()
                     } else {
-                        format!("{} ({})", title, &id[..8])
+                        format!("{} ({})", title, id_prefix)
                     };
                     keyboard_rows.push(vec![KeyboardButton::new(label)]);
                 }
@@ -379,15 +380,17 @@ pub async fn receive_session_selection(
     msg: Message, 
     dialogue: MyDialogue, 
     (prev_session_id, prev_directory, prev_model): (Option<String>, Option<String>, Option<String>),
+    client: Client,
+    server_url: Arc<String>,
 ) -> HandlerResult {
     let selection = msg.text().unwrap_or("").to_string();
-    
+
     if selection.contains("Cancel / Go Back") {
         let bot_msg = bot.send_message(msg.chat.id, "Going back...")
             .reply_markup(main_menu_keyboard())
             .await?;
         let _ = bot.delete_message(msg.chat.id, bot_msg.id).await;
-            
+
         if let Some(sid) = prev_session_id {
             dialogue.update(State::ActiveSession { session_id: sid, directory: prev_directory, model: prev_model }).await?;
         } else {
@@ -395,9 +398,9 @@ pub async fn receive_session_selection(
         }
         return Ok(());
     }
-    
-    // Extract ID from label "Title (id_prefix)" or just "id"
-    let session_id = if selection.contains('(') && selection.contains(')') {
+
+    // Extract ID prefix from label "Title (id_prefix)" or just "id"
+    let id_prefix = if selection.contains('(') && selection.contains(')') {
         if let Some(start) = selection.rfind('(') {
             if let Some(end) = selection.rfind(')') {
                 selection[start+1..end].to_string()
@@ -408,22 +411,41 @@ pub async fn receive_session_selection(
             selection
         }
     } else {
-        selection
+        selection.clone()
     };
 
-    bot.send_message(msg.chat.id, format!("🔄 Resuming session: `{}`", session_id))
+    // Look up the full session ID from the API
+    let mut full_session_id = id_prefix.clone();
+    let mut new_directory = prev_directory.clone();
+
+    if let Ok(res) = client.get(format!("{}/session", server_url)).send().await {
+        if let Ok(sessions) = res.json::<Vec<Value>>().await {
+            for sess in sessions {
+                if let Some(id) = sess["id"].as_str() {
+                    if id.starts_with(&id_prefix) || id == id_prefix {
+                        full_session_id = id.to_string();
+                        if let Some(dir) = sess["directory"].as_str() {
+                            new_directory = Some(dir.to_string());
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    bot.send_message(msg.chat.id, format!("🔄 Resuming session: `{}`", full_session_id))
         .reply_markup(main_menu_keyboard())
         .await?;
-        
-    dialogue.update(State::ActiveSession { 
-        session_id, 
-        directory: prev_directory, 
-        model: prev_model 
+
+    dialogue.update(State::ActiveSession {
+        session_id: full_session_id,
+        directory: new_directory,
+        model: prev_model
     }).await?;
-    
+
     Ok(())
 }
-
 pub async fn handle_no_session(bot: Bot, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Please /start the bot or create a /session first.").await?;
     Ok(())

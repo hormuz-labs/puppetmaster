@@ -38,6 +38,9 @@ Prefix any message with `!` to instantly run a bash command on the host machine 
 ### Fetch Local Files
 Use the `/fetch <path>` command to quickly grab files from your host machine (either relative to the active project directory or an absolute path) and receive them in Telegram as documents or images.
 
+### Agent Skills & Notifications
+Includes a built-in OpenCode Agent Skill (`telegram-notify`) and a standalone CLI tool (`tg-notify`). This allows AI agents running on your machine to proactively send you notifications, generated files (PDFs, reports), or alerts directly to your Telegram chat.
+
 ### Intelligent Payload Handling
 Bypasses Telegram's strict 4096-character message limits natively. Long responses (such as complete code file generation or huge command outputs) are dynamically split into discrete, sequential message bubbles on-the-fly.
 
@@ -88,6 +91,13 @@ Clone the repository and compile the binary:
 git clone https://github.com/hormuz-labs/puppetmaster.git
 cd puppetmaster
 cargo build --release
+```
+
+**Install the Agent Skills & CLI Tool (Optional):**
+To allow your local AI agents to send you files and notifications, run the included install script. This will compile the `tg-notify` tool and copy the `telegram-notify` skill to your local `.agents` and `.config/opencode` directories.
+
+```bash
+./install.sh
 ```
 
 ---

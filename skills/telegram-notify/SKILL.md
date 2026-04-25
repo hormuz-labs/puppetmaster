@@ -1,6 +1,6 @@
 ---
 name: telegram-notify
-description: Sends messages, images, videos, or documents to the user via Telegram. Useful for async communication, alerting the user when a long task is finished, or sending artifacts/screenshots directly to their phone.
+description: Sends notifications, messages, images, videos, or documents to the user via Telegram. This is the PRIMARY way to send generated files (PDFs, reports, etc.) back to the user or notify them of important updates.
 ---
 
 # Telegram Notification Skill
@@ -8,9 +8,10 @@ description: Sends messages, images, videos, or documents to the user via Telegr
 This skill allows the agent to send updates and files directly to the user's Telegram account. It supports text messages, images, videos, audio files, and general documents.
 
 ## When to use
-- The user asks you to "notify me on Telegram" when a long-running task (like a build, deployment, or script) finishes.
-- You generated or downloaded an image, video, audio recording, or report, and the user wants it sent to them.
-- You encounter a critical error during an asynchronous background task and need to alert the user.
+- **Sending Files:** When you generate a file (like a PDF report, a CSV export, or a diagram) and need to "send it back" to the user.
+- **Async Updates:** The user asks you to "notify me on Telegram" when a long-running task (like a build, deployment, or script) finishes.
+- **Media Sharing:** You generated or downloaded an image, video, or audio recording, and the user wants it sent to them.
+- **Alerts:** You encounter a critical error during an asynchronous background task and need to alert the user.
 
 ## How to use
 Execute the `tg-notify` binary.
@@ -21,12 +22,17 @@ tg-notify "<Message or Caption>" "[Optional/Path/To/File]"
 ```
 
 ### Examples
-Sending a simple text message:
+#### Sending a PDF Report
+```bash
+tg-notify "Here is the summary report you requested." "./output/report.pdf"
+```
+
+#### Sending a simple text message
 ```bash
 tg-notify "✅ The database migration completed successfully."
 ```
 
-Sending an image with a caption:
+#### Sending an image with a caption
 ```bash
 tg-notify "Here is the architectural diagram you requested." "./diagram.png"
 ```

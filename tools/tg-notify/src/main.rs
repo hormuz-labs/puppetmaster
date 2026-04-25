@@ -136,6 +136,7 @@ async fn main() -> Result<()> {
         let form = multipart::Form::new()
             .text("chat_id", chat_id)
             .text("caption", final_message)
+            .text("parse_mode", "Markdown")
             .part(param, file_part);
 
         let url = format!("https://api.telegram.org/bot{}/{}", token, endpoint);

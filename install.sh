@@ -64,9 +64,15 @@ fi
 
 # Install Skill
 SKILLS_DIR="${HOME}/.agents/skills"
-echo "🔧 Installing Agent Skill to ${SKILLS_DIR}..."
+OPENCODE_SKILLS_DIR="${HOME}/.config/opencode/skills"
+
+echo "🔧 Installing Agent Skill..."
 mkdir -p "${SKILLS_DIR}"
+mkdir -p "${OPENCODE_SKILLS_DIR}"
+
 cp -r "${TMP_DIR}/skills/telegram-notify" "${SKILLS_DIR}/"
+cp -r "${TMP_DIR}/skills/telegram-notify" "${OPENCODE_SKILLS_DIR}/"
+
 
 # Cleanup
 rm -rf "${TMP_DIR}"
